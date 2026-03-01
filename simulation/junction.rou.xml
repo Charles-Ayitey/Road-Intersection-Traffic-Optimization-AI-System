@@ -4,10 +4,34 @@
     <route id="s2n" edges="s2c c2n"/>
     <route id="e2w" edges="e2c c2w"/>
     <route id="w2e" edges="w2c c2e"/>
-    
-    <!-- Initial flow of vehicles -->
-    <flow id="f_n2s" begin="0" end="3600" vehsPerHour="300" route="n2s" type="car"/>
-    <flow id="f_s2n" begin="0" end="3600" vehsPerHour="300" route="s2n" type="car"/>
-    <flow id="f_e2w" begin="0" end="3600" vehsPerHour="300" route="e2w" type="car"/>
-    <flow id="f_w2e" begin="0" end="3600" vehsPerHour="300" route="w2e" type="car"/>
+
+    <!-- Off-peak: balanced low flow (0–600s) -->
+    <flow id="off_n2s" begin="0"   end="600"  vehsPerHour="150" route="n2s" type="car"/>
+    <flow id="off_s2n" begin="0"   end="600"  vehsPerHour="150" route="s2n" type="car"/>
+    <flow id="off_e2w" begin="0"   end="600"  vehsPerHour="150" route="e2w" type="car"/>
+    <flow id="off_w2e" begin="0"   end="600"  vehsPerHour="150" route="w2e" type="car"/>
+
+    <!-- Morning rush: heavy N-S flow (600–1800s) -->
+    <flow id="rush_n2s" begin="600"  end="1800" vehsPerHour="700" route="n2s" type="car"/>
+    <flow id="rush_s2n" begin="600"  end="1800" vehsPerHour="600" route="s2n" type="car"/>
+    <flow id="rush_e2w" begin="600"  end="1800" vehsPerHour="200" route="e2w" type="car"/>
+    <flow id="rush_w2e" begin="600"  end="1800" vehsPerHour="200" route="w2e" type="car"/>
+
+    <!-- Midday: moderate balanced flow (1800–2700s) -->
+    <flow id="mid_n2s" begin="1800" end="2700" vehsPerHour="350" route="n2s" type="car"/>
+    <flow id="mid_s2n" begin="1800" end="2700" vehsPerHour="350" route="s2n" type="car"/>
+    <flow id="mid_e2w" begin="1800" end="2700" vehsPerHour="300" route="e2w" type="car"/>
+    <flow id="mid_w2e" begin="1800" end="2700" vehsPerHour="300" route="w2e" type="car"/>
+
+    <!-- Evening rush: heavy E-W flow (2700–3400s) -->
+    <flow id="eve_n2s" begin="2700" end="3400" vehsPerHour="250" route="n2s" type="car"/>
+    <flow id="eve_s2n" begin="2700" end="3400" vehsPerHour="250" route="s2n" type="car"/>
+    <flow id="eve_e2w" begin="2700" end="3400" vehsPerHour="650" route="e2w" type="car"/>
+    <flow id="eve_w2e" begin="2700" end="3400" vehsPerHour="700" route="w2e" type="car"/>
+
+    <!-- Wind-down: low flow (3400–3600s) -->
+    <flow id="end_n2s" begin="3400" end="3600" vehsPerHour="100" route="n2s" type="car"/>
+    <flow id="end_s2n" begin="3400" end="3600" vehsPerHour="100" route="s2n" type="car"/>
+    <flow id="end_e2w" begin="3400" end="3600" vehsPerHour="100" route="e2w" type="car"/>
+    <flow id="end_w2e" begin="3400" end="3600" vehsPerHour="100" route="w2e" type="car"/>
 </routes>

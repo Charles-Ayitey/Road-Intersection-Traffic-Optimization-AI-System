@@ -2,6 +2,10 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Dict
 import time
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -11,7 +15,9 @@ def get_empty_state():
         "current_phase": 0,
         "last_vision_update": 0.0,
         "last_agent_action": 0,
-        "system_status": "Starting..."
+        "system_status": "Starting...",
+        "mode": "AI Controlled",
+        "manual_phase": 0
     }
 
 traffic_system_state = get_empty_state()
@@ -23,6 +29,12 @@ class VisionUpdate(BaseModel):
 class AgentAction(BaseModel):
     action: int
     phase: int
+
+class ModeUpdate(BaseModel):
+    mode: str  # "AI Controlled" | "Fixed Timing" | "Manual Override"
+
+class PhaseUpdate(BaseModel):
+    phase: int  # 0 = NS Green, 2 = EW Green
 
 @app.get("/")
 def read_root():
@@ -43,6 +55,26 @@ def update_counts(data: VisionUpdate):
     traffic_system_state["last_vision_update"] = data.timestamp
     traffic_system_state["system_status"] = "Active"
     return {"status": "ok"}
+
+@app.post("/set_mode")
+def set_mode(data: ModeUpdate):
+    global traffic_system_state
+    valid_modes = {"AI Controlled", "Fixed Timing", "Manual Override"}
+    if data.mode not in valid_modes:
+        return {"status": "error", "message": f"Invalid mode. Choose from: {valid_modes}"}
+    traffic_system_state["mode"] = data.mode
+    log.info(f"Mode changed to: {data.mode}")
+    return {"status": "ok", "mode": data.mode}
+
+@app.post("/set_phase")
+def set_phase(data: PhaseUpdate):
+    """Used by the dashboard in Manual Override mode to directly command a phase."""
+    global traffic_system_state
+    if data.phase not in [0, 2]:
+        return {"status": "error", "message": "Phase must be 0 (NS Green) or 2 (EW Green)"}
+    traffic_system_state["manual_phase"] = data.phase
+    log.info(f"Manual phase set to: {data.phase}")
+    return {"status": "ok", "manual_phase": data.phase}
 
 @app.get("/get_state")
 def get_state():
