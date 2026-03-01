@@ -1,0 +1,13 @@
+<routes>
+    <vType id="car" accel="2.6" decel="4.5" sigma="0.5" length="5" minGap="2.5" maxSpeed="13.89" guiShape="passenger"/>
+    <route id="n2s" edges="n2c c2s"/>
+    <route id="s2n" edges="s2c c2n"/>
+    <route id="e2w" edges="e2c c2w"/>
+    <route id="w2e" edges="w2c c2e"/>
+    
+    <!-- Initial flow of vehicles -->
+    <flow id="f_n2s" begin="0" end="3600" vehsPerHour="300" route="n2s" type="car"/>
+    <flow id="f_s2n" begin="0" end="3600" vehsPerHour="300" route="s2n" type="car"/>
+    <flow id="f_e2w" begin="0" end="3600" vehsPerHour="300" route="e2w" type="car"/>
+    <flow id="f_w2e" begin="0" end="3600" vehsPerHour="300" route="w2e" type="car"/>
+</routes>
