@@ -2,10 +2,10 @@
     "yolo_model": "yolov8n.pt",
     "confidence_threshold": 0.3,
     "api_url": "http://localhost:8000/update_counts",
-    "active_scenario": "hong_kong_top",
+    "active_scenario": "traffic_test",
     "scenarios": {
         "traffic_test": {
-            "source": "data/traffic_test.jpg",
+            "source": "data/stock-footage-hong-kong-february-top-view-on-traffic-flow-on-green-light-street-t-crossing-static.mp4",
             "zones": [
                 {"name": "North-West", "polygon": [[0.0, 0.0], [0.5, 0.0], [0.5, 0.5], [0.0, 0.5]], "map_to": "North"},
                 {"name": "North-East", "polygon": [[0.5, 0.0], [1.0, 0.0], [1.0, 0.5], [0.5, 0.5]], "map_to": "North"},
