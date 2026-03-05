@@ -182,10 +182,71 @@ Please replace use_container_width with width. use_container_width will be remov
 ---
 
 ### I-05 — Vision Zone Coordinates Are Hardcoded for One Camera
-**Status:** Open  
+**Status:** Partially resolved (2026-03-05)  
 **Description:** The ROI polygon coordinates in `vision/detector.py` are tuned for a specific camera resolution and mounting angle. They are not automatically recalibrated when a new video source has different framing.  
 **Impact:** Queue counts will be inaccurate for any camera that does not match the original calibration, quietly degrading reward signals and KPI displays.  
-**Suggested next step:** Expose zone coordinates in `config.json` with a per-source override; add a calibration utility that lets an operator click zone corners on a reference frame.
+**Resolution so far:**
+- Zone coordinates are now stored in `config.json` under each scenario's `zones` array as normalised (0–1) polygon points, applied at runtime via `ZoneCounter.scale_polygon(w, h)` based on the actual frame dimensions.
+- `vision/calibrate_zones.py` provides an interactive OpenCV tool for clicking zone corners on a camera frame and exporting paste-ready JSON.
+- `_process_playlist()` resets `self.polygons_scaled = False` when advancing to a new video so zones are rescaled for the new resolution automatically.
+**Remaining risk:** Zone polygons in `config.json` are still manually maintained — there is no automated QA check that verifies a polygon actually covers an approach lane rather than an empty area of the frame.
+
+---
+
+### C-14 — `compute_pressure()` Returned `None`, Breaking Max-Pressure Override
+**File:** `ai_agent/max_pressure.py`  
+**Symptom observed:** Every live-run step logged `TypeError: '>' not supported between instances of 'NoneType' and 'NoneType'` from inside `should_override()`.  
+**Root cause:** `compute_pressure()` had a `try/except` block where the success path fell through to the end of the function without an explicit `return`. Python implicitly returned `None`. `should_override()` called `max()` on the resulting `{phase_id: None}` dict, which crashed on the comparison.  
+**Resolution:** Added `return float(inbound - outbound)` at the end of the try block; added `int(traci.lane.getLastStepHaltingNumber(l) or 0)` guard on each lane call to handle lanes where TraCI returns `None`; widened the `except` from bare to `except Exception` so unexpected TraCI errors are caught without silently swallowing all failures.
+
+---
+
+### C-15 — Dashboard Always Displayed NS Green Regardless of Actual Phase
+**File:** `dashboard/app.py`, `ai_agent/live_controller.py`  
+**Symptom observed:** Live run of 116 steps showed "NS Green" in the dashboard for every step even though the controller was alternating between NS and EW.
+**Root cause (1 — duplicate code):** A previous automated edit had appended an entire second copy of `dashboard/app.py` to the bottom of the file. The duplicate contained an older, simpler phase-display block that evaluated after the correct one on every rerender, unconditionally overwriting it back to NS.  
+**Root cause (2 — posting timing):** The controller posted the phase to the API only during the yellow transition (≈1.7 s). The dashboard polled every 1 s and almost always caught the tail of the yellow window, reading "phase 1 (yellow)" before EW had been written.  
+**Resolution:** Removed the duplicate code block from `app.py`. Moved the `post_phase_to_api()` call to **before** `env.step()` so the API records the upcoming green phase for the full duration of the green. `post_phase_to_api()` now skips yellow phases (1, 3) entirely to avoid confusing the dashboard.
+
+---
+
+### C-16 — South-Lane Congestion Bias in Reward Function
+**Files:** `ai_agent/sumo_env.py`, `ai_agent/colab_train.py`  
+**Symptom observed:** In long live runs, South-lane queue consistently grew to 15–19 vehicles without the agent switching away, even when E/W queues were manageable.  
+**Root cause:** The reward treated every cleared vehicle identically: `vehicles_cleared = sum(queues_before) - sum(queues_after)`. Clearing 3 vehicles from a congested approach (queue 18) counted the same as clearing 3 from a light approach (queue 2). The agent had no incentive to prioritise the worst-congested lane.  
+**Resolution:** Per-lane congestion weight applied at reward time: `cleared_i × (1 + queue_before_i / max_queue_before)`. Lanes with heavier congestion at the start of the green phase contribute proportionally more to the reward. A lane at maximum queue provides twice the reward-per-vehicle compared to an empty lane.
+
+---
+
+### C-17 — Duplicate Log Lines (Steps Appearing 2–3× in Output)
+**File:** `ai_agent/live_controller.py`  
+**Symptom observed:** Steps 112–113 appeared three times in the console and log file.  
+**Root cause:** `logging.basicConfig()` was called once inside `live_controller.py` and once implicitly by `launch_system.py` when it imported the module. Python's logging system added a second (or third) `StreamHandler` on each call, causing every log record to be emitted once per handler.  
+**Resolution:** Added `force=True` to the `logging.basicConfig()` call in `live_controller.py`. With `force=True`, the root logger's existing handlers are removed before the new configuration is applied, ensuring exactly one handler is registered regardless of import order.
+
+---
+
+### C-18 — Reward Volatility from Outbound Flow Inflation on Long Phases
+**Files:** `ai_agent/sumo_env.py`, `ai_agent/colab_train.py`  
+**Symptom observed:** Reward swings of −10 to +26 within steps 23–40 of a live run with no corresponding change in queue state.  
+**Root cause:** On a 30-second green phase (`action[1]=2`, `duration_steps=6`), `outbound_flow` accumulated vehicle counts across all 6 simulation steps (`delta_time=5` each). The reward term `0.5 * outbound_flow` therefore received a value 6× larger than on a 5-second phase, inflating the reward proportionally to phase length regardless of actual throughput rate.  
+**Resolution:** Normalised outbound flow: `outbound_flow / chunks` where `chunks = duration_steps / delta_time`. The outbound reward component now represents **average throughput per 5-second step** rather than a raw total, making rewards comparable across all three duration levels.
+
+---
+
+### C-19 — East/West Detector Always Returned 0 (Wrong Zone Geometry)
+**File:** `config.json`  
+**Symptom observed:** E=0, W=0 on every step of the 116-step live run.  
+**Root cause:** The `traffic_test` scenario had four zone polygons configured as left/right/top/bottom screen quadrants with `map_to` fields set to `North`, `North`, `South`, `South`. There were no zones at all mapped to `East` or `West`. Even a perfectly working vision pipeline would always count 0 for both eastern approaches.  
+**Resolution:** Replaced the four quadrant polygons with four arm-shaped polygons that extend along each of the four approach directions from the intersection centre outward, with `map_to` correctly set to `North`, `South`, `East`, and `West` respectively.
+
+---
+
+### C-20 — Street-Level Training Videos Corrupting Top-Down Zone Counts
+**Files:** `vision/detector.py`, `config.json`  
+**Symptom:** After the 34 Ghanaian traffic videos were added to `data/`, the auto-discover playlist included street-level footage. Top-down N/S/E/W zone polygons do not correspond to any meaningful region of a street-level perspective, producing 0 or random counts for all arms.  
+**Root cause:** `_discover_videos()` scanned all video files in `data/` without discriminating by camera perspective. The 34 training videos are real-world street-level footage recorded for RL training diversity; they are not overhead intersection views compatible with polygon-based zone counting.  
+**Resolution:** Added a `video_list` field to scenario configurations in `config.json`. When present, `_discover_videos()` builds the playlist exclusively from the listed files. The `traffic_test` scenario now explicitly lists only the five overhead-compatible intersection videos. The auto-discover fallback and SUMO training videos are no longer mixed into the vision pipeline.
 
 ---
 

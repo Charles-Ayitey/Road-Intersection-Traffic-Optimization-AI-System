@@ -92,4 +92,98 @@ This log records the chronological steps and technical actions taken during the 
 
 ---
 
+### **Date: 2026-03-05**
+
+#### **Step 12: Additional Model Integrations**
+- **Action:** User returned from further Colab runs with `best_model.zip` and `best_model_2.zip` (best-checkpoint saves from the EvalCallback, outperforming the final-step saves).
+- **Action:** Updated `MODEL_SEARCH_PATHS` in `ai_agent/live_controller.py` — `best_model_2.zip` placed at index 0, `best_model.zip` at index 2. Full search order:
+  ```
+  1. models/best_model_2.zip          ← best eval checkpoint, latest run
+  2. models/ppo_traffic_agent_refined_4.zip
+  3. models/best_model.zip
+  4. models/ppo_traffic_agent_refined_3.zip
+  5. models/ppo_traffic_agent_refined_2.zip
+  6. models/ppo_traffic_agent_refined.zip
+  7. models/ppo_traffic_agent.zip
+  ```
+
+#### **Step 13: `compute_pressure()` NoneType Fix**
+- **Problem observed:** Every live step produced `TypeError: '>' not supported between instances of 'NoneType' and 'NoneType'` from `ai_agent/max_pressure.py`.
+- **Root cause:** `compute_pressure()` contained a `try/except` block that returned `None` on success (missing explicit `return` statement). `should_override()` then called `max()` on a dict of `None` values.
+- **Fix:** Added `return float(inbound - outbound)` at the end of the function; added `int(traci.lane.getLastStepHaltingNumber(l) or 0)` guard to each lane call; widened `except` from bare to `except Exception`.
+- **File changed:** `ai_agent/max_pressure.py`
+
+#### **Step 14: Step 2 — Upstream Induction Loop Detectors**
+- **Action:** Created `simulation/junction.add.xml` with four E1 induction loops (`det_n`, `det_s`, `det_e`, `det_w`) placed at pos=33 (~60 m upstream of the stop line on each inbound lane), `freq="5"`.
+- **Action:** Updated `simulation/junction.sumocfg` to load the additionals file via `<additional-files value="junction.add.xml"/>`.
+- **Action:** Updated `ai_agent/sumo_env.py`:
+  - Added `_write_add_xml()` — regenerates `junction.add.xml` at runtime with OS-correct null device (`/dev/null` vs `NUL`).
+  - Added `self.detector_ids = ["det_n", "det_s", "det_e", "det_w"]`.
+  - Expanded observation space from 5 to **9 elements**: `[Q_N, Q_S, Q_E, Q_W, Occ_N, Occ_S, Occ_E, Occ_W, phase]`.
+  - `_get_obs()` now reads loop occupancy via `traci.inductionloop.getLastStepOccupancy()`.
+- **Action:** Synced all changes into `ai_agent/colab_train.py`.
+- **Outcome:** Agent receives upstream approach-saturation data that arrives before vehicles reach the stop line, giving it early warning of building queues.
+
+#### **Step 15: Step 3 — Dynamic Phase Duration**
+- **Action:** Changed `action_space` from `spaces.Discrete(2)` to `spaces.MultiDiscrete([2, 3])`.
+  - `action[0]` = phase direction (0 = NS, 1 = EW)
+  - `action[1]` = duration level (0 = 5 s, 1 = 15 s, 2 = 30 s) — mapped via `_DURATION_STEPS = [1, 3, 6]` simulation steps at `delta_time=5`.
+- **Action:** Updated `ai_agent/live_controller.py`:
+  - Decodes `dur_idx = int(action[1])` and logs `dur_label = ["5s", "15s", "30s"][dur_idx]` on every step.
+  - Phase is now posted to the API **before** `env.step()` so the dashboard displays the chosen phase for the entire green duration, not just during the yellow transition.
+  - `post_phase_to_api()` skips posting during yellow phases (1, 3) to avoid misleading the dashboard.
+  - Request timeout raised from 0.1 s to 0.5 s.
+- **Action:** Added `logging.basicConfig(..., force=True)` to prevent duplicate log lines when the logger is initialised twice (by `live_controller.py` and by `launch_system.py`).
+- **Action:** Synced all changes into `ai_agent/colab_train.py`.
+- **Outcome:** Agent can now hold a green for 5, 15, or 30 seconds rather than always using a fixed 30-second cycle.
+
+#### **Step 16: Live Run Diagnostics — 5-Issue Batch Fix**
+User ran 116-step live session and identified five issues:
+
+**16a — EW Camera Zone Geometry**
+- **Problem:** `config.json` `traffic_test` scenario had four quadrant zones all mapped to either `North` or `South`. East and West zones were structurally absent.
+- **Fix:** Replaced the four quadrant polygons with four arm-shaped polygons aligned with the N/S/E/W approach lanes.
+
+**16b — Dashboard Always Showing NS Green**
+- **Problem (1):** An entire duplicate copy of `dashboard/app.py` had been appended to the end of the file by a previous edit operation. The duplicate contained different phase-display logic that was overwriting the correct implementation.
+- **Problem (2):** Phase was posted to the API only during the 1.7 s yellow transition; the dashboard polled every 1 s and almost always missed EW phases.
+- **Fix:** Removed the duplicate code block; moved phase posting to before `env.step()` (Step 15 above).
+
+**16c — South Lane Congestion Bias**
+- **Problem:** Reward treated cleared vehicles equally regardless of which lane was most congested, giving no extra credit for relieving the worst-affected approach.
+- **Fix:** Per-lane clearing weight: `cleared_i × (1 + queue_before_i / max_queue_before)`. Lanes that were more congested at the start of the green phase contribute more to the reward than lightly-loaded lanes.
+
+**16d — Missing / Duplicate Log Steps**
+- **Problem:** Steps 112–113 appeared three times in the log. `logging.basicConfig` was called twice (once in `live_controller.py`, once implicitly via `launch_system.py`), creating two handlers and doubling (or tripling) output.
+- **Fix:** Added `force=True` to `logging.basicConfig()` in `live_controller.py` (see Step 15).
+
+**16e — Reward Volatility (swings of −10 to +26)**
+- **Problem:** On 30-second green phases, `outbound_flow` accumulated vehicle counts across all 6 simulation steps. This inflated the outbound contribution by up to 6×, causing reward spikes on long phases.
+- **Fix:** Normalised outbound flow: `outbound_flow / chunks` where `chunks = duration_steps / delta_time`. The outbound reward now represents average throughput per step rather than a raw total.
+- **Files changed:** `ai_agent/sumo_env.py`, `ai_agent/colab_train.py`
+
+#### **Step 17: Video Playlist Architecture — `video_list` Allowlist**
+- **Problem identified:** The 34 Ghanaian training videos in `data/` are street-level footage unsuitable for top-down zone polygon counting. The auto-discover playlist exposed these files to the vision pipeline, producing zero or garbage counts for all arms.
+- **Action:** Added `video_list` field to scenario configs in `config.json`. When present, `_discover_videos()` builds the playlist exclusively from the listed files instead of auto-scanning `data/`.
+  - Priority chain: `scenario.video_list` → auto-discover `data/` → `config.source` fallback.
+- **Action:** Set `video_list` in `traffic_test` to the five overhead-compatible intersection videos.
+- **File changed:** `vision/detector.py` (`_discover_videos()` rewritten), `config.json`
+
+#### **Step 18: Real Camera Integration**
+- **Action:** Added `live_camera` scenario to `config.json` with an RTSP placeholder source, `reconnect_on_drop: true`, and 4-arm zone placeholders.
+- **Action:** Refactored `vision/detector.py`:
+  - Added `_is_live_source(source)` — returns `True` for RTSP URLs, HTTP streams, and integer webcam indices.
+  - `process_video()` is now a router: calls `_process_live_stream()` for live sources, `_process_playlist()` for file playlists.
+  - `_process_live_stream()` — outer reconnect loop with `RECONNECT_DELAY` (configurable); inner read loop skips yellow phases, logs reconnect events.
+  - `_process_playlist()` — fixed to include `cap` initialisation; cycles through playlist with per-clip zone rescaling.
+- **Action:** Created `vision/calibrate_zones.py` — interactive OpenCV zone calibration tool:
+  - Opens the first frame of the configured source (video file, RTSP stream, or webcam).
+  - Operator clicks 4+ points per arm to define zone polygons.
+  - Controls: left-click (add point), right-click (undo), ENTER (close arm), R (reset arm), S (save), Q (quit).
+  - Saves normalised (0–1) coordinates to `vision/zones_calibrated.json` and prints a paste-ready JSON snippet for `config.json`.
+  - Usage: `python vision/calibrate_zones.py [--scenario NAME] [--source PATH] [--arms N S E W]`
+- **Files changed / created:** `vision/detector.py`, `vision/calibrate_zones.py`, `config.json`
+
+---
+
 *Log will be updated after every significant technical step.*

@@ -54,20 +54,53 @@ class VehicleDetector:
         log.info(f"Video playlist ({len(self._playlist)} video(s)): {self._playlist}")
 
     def _discover_videos(self):
-        """Find all video files in the data/ folder automatically."""
-        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        """Build the video playlist for this scenario.
+
+        Priority order:
+          1. scenario['video_list'] — explicit allowlist of geometrically
+             compatible videos for this camera perspective.  Paths are relative
+             to the project root.
+          2. Auto-discover all video files in data/ — used only when no
+             video_list is specified (e.g. simple single-camera scenarios).
+          3. Fall back to scenario['source'] if neither produces results.
+
+        The 34 Ghanaian training videos in data/ are SUMO training data, not
+        vision-pipeline sources.  Street-level footage cannot produce correct
+        N/S/E/W counts from top-down zone polygons, so they must not be
+        included in the playlist for top-down scenarios.
+        """
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        # 1. Explicit video_list in scenario config
+        explicit = self.scenario.get('video_list')
+        if explicit:
+            videos = []
+            for rel_path in explicit:
+                abs_path = os.path.join(root, rel_path.replace('/', os.sep))
+                if os.path.isfile(abs_path):
+                    videos.append(abs_path)
+                else:
+                    log.warning(f"video_list entry not found, skipping: {rel_path}")
+            if videos:
+                return videos
+            log.warning("video_list specified but no files found; falling back to auto-discover.")
+
+        # 2. Auto-discover data/ (no video_list configured)
+        data_dir = os.path.join(root, "data")
         videos = []
         if os.path.isdir(data_dir):
             for fname in sorted(os.listdir(data_dir)):
                 if os.path.splitext(fname)[1].lower() in self.VIDEO_EXTENSIONS:
                     videos.append(os.path.join(data_dir, fname))
-        # Fall back to the config-specified source if no videos found in data/
-        if not videos:
-            fallback = self.scenario.get('source')
-            if fallback:
-                log.warning(f"No videos found in data/. Falling back to config source: {fallback}")
-                videos = [fallback]
-        return videos
+        if videos:
+            return videos
+
+        # 3. Fallback to config source
+        fallback = self.scenario.get('source')
+        if fallback:
+            log.warning(f"No videos found in data/. Falling back to config source: {fallback}")
+            return [fallback]
+        return []
 
     def detect_and_count(self, frame):
         h, w = frame.shape[:2]
@@ -108,14 +141,79 @@ class VehicleDetector:
         except requests.RequestException as e:
             log.warning(f"Failed to report counts to API: {e}")
 
+    def _is_live_source(self, source) -> bool:
+        """Return True if source is a live stream (not a local file)."""
+        if isinstance(source, int):
+            return True  # webcam index
+        s = str(source)
+        return s.startswith("rtsp://") or s.startswith("http://") or s.startswith("https://")
+
     def process_video(self, show=True):
+        live = self.scenario.get("reconnect_on_drop", False) or (
+            not self._playlist and self._is_live_source(self.scenario.get("source", ""))
+        )
+
+        if live:
+            self._process_live_stream(show)
+        else:
+            self._process_playlist(show)
+
+    def _process_live_stream(self, show=True):
+        """Continuously read from a live camera, reconnecting on drop."""
+        source = self.scenario.get("source")
+        # Allow integer webcam index stored as string in JSON
+        try:
+            source = int(source)
+        except (ValueError, TypeError):
+            pass
+
+        log.info(f"Opening live stream: {source}")
+        RECONNECT_DELAY = 3  # seconds between reconnect attempts
+
+        while True:
+            cap = cv2.VideoCapture(source)
+            if not cap.isOpened():
+                log.error(f"Cannot open stream '{source}'. Retrying in {RECONNECT_DELAY}s...")
+                time.sleep(RECONNECT_DELAY)
+                continue
+
+            log.info("Live stream connected.")
+            self.polygons_scaled = False
+            frame_idx = 0
+
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    log.warning("Stream dropped. Reconnecting...")
+                    cap.release()
+                    time.sleep(RECONNECT_DELAY)
+                    break  # break inner loop → reconnect outer loop
+
+                if frame_idx % 5 == 0:
+                    detections, counts = self.detect_and_count(frame)
+                    self.report_to_api(counts)
+
+                    if show:
+                        for zone in self.zones:
+                            cv2.polylines(frame, [zone.polygon], True, (0, 255, 255), 2)
+                            cv2.putText(frame, f"{zone.map_to}: {zone.count}",
+                                        (zone.polygon[0][0], zone.polygon[0][1] - 10),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                        cv2.imshow("Traffic Vision Pipeline (LIVE)", frame)
+                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                            cap.release()
+                            cv2.destroyAllWindows()
+                            return
+                frame_idx += 1
+
+    def _process_playlist(self, show=True):
         if not self._playlist:
-            log.error("No video sources available. Add .mp4 files to the data/ folder.")
+            log.error("Playlist is empty — no videos to process.")
             return
 
         source = self._playlist[self._playlist_index]
+        log.info(f"Starting playlist at video {self._playlist_index + 1}/{len(self._playlist)}: {os.path.basename(source)}")
         cap = cv2.VideoCapture(source)
-        log.info(f"Playing video {self._playlist_index + 1}/{len(self._playlist)}: {os.path.basename(source)}")
 
         frame_idx = 0
         while cap.isOpened():

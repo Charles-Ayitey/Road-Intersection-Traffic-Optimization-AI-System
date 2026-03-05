@@ -60,12 +60,12 @@ def collect_files():
     else:
         print(f"  WARNING: data/ folder not found at {data_dir}")
 
-    # 3. colab_train.py
-    colab_script = os.path.join(ROOT, "colab_train.py")
+    # 3. colab_train.py  (lives in ai_agent/ but is placed at zip root for Colab)
+    colab_script = os.path.join(ROOT, "ai_agent", "colab_train.py")
     if os.path.exists(colab_script):
         files.append((colab_script, "colab_train.py"))
     else:
-        print(f"  WARNING: colab_train.py not found — run this script from the project root")
+        print(f"  WARNING: ai_agent/colab_train.py not found — run this script from the project root")
 
     return files
 

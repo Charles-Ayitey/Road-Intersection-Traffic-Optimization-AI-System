@@ -12,7 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ai_agent.sumo_env import SumoTrafficEnv
 from ai_agent.max_pressure import should_override
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)
 log = logging.getLogger(__name__)
 
 API_URL = "http://localhost:8000"
@@ -22,6 +22,8 @@ API_URL = "http://localhost:8000"
 MP_OVERRIDE_THRESHOLD = 5.0
 # Search order: try refined model first, fall back to base training output
 MODEL_SEARCH_PATHS = [
+    os.path.join("models", "best_model_2.zip"),
+    os.path.join("models", "ppo_traffic_agent_refined_4.zip"),  # final model (throughput reward)
     os.path.join("models", "best_model.zip"),                   # best eval checkpoint (throughput reward)
     os.path.join("models", "ppo_traffic_agent_refined_3.zip"),  # final model (throughput reward)
     os.path.join("models", "ppo_traffic_agent_refined_2.zip"),
@@ -87,8 +89,12 @@ class LiveRLController:
         return merged
 
     def post_phase_to_api(self, phase_id):
+        # Skip transient yellow phases (1, 3) — the dashboard only needs to
+        # know the active green phase (0=NS, 2=EW); yellow is too brief to display.
+        if int(phase_id) not in (0, 2):
+            return
         try:
-            requests.post(f"{API_URL}/set_action", json={"action": 0, "phase": int(phase_id)}, timeout=0.1)
+            requests.post(f"{API_URL}/set_action", json={"action": 0, "phase": int(phase_id)}, timeout=0.5)
         except requests.RequestException as e:
             log.debug(f"Phase post failed: {e}")
 
@@ -213,6 +219,9 @@ class LiveRLController:
             dur_idx     = int(action[1]) if hasattr(action, '__len__') else 1
             action_name = "NORTH-SOUTH" if phase_idx == 0 else "EAST-WEST"
             dur_label   = ["5s", "15s", "30s"][dur_idx]
+            # Post the intended green phase to the API BEFORE running the
+            # simulation step so the dashboard shows it for the full step duration.
+            self.post_phase_to_api(phase_idx * 2)
             obs_sim, reward, term, trunc, _ = self.env.step(action, callback=self.post_phase_to_api)
 
             q = current_obs[:4]

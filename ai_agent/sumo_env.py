@@ -194,17 +194,21 @@ class SumoTrafficEnv(gym.Env):
         queues_after = obs[:4]
 
         # ── Throughput reward ────────────────────────────────────────────────
-        # vehicles_cleared: queue reduction on each approach (clamped to 0 so
-        #   new arrivals during the phase don't produce a negative contribution).
+        # Per-lane congestion weights: clearing a heavily backed-up lane earns
+        # proportionally more reward than clearing a lightly used approach.
+        # This corrects the NS-always bias when one direction has persistent
+        # high queues — the agent is incentivised to address that direction.
+        max_q = max(queues_before) if max(queues_before) > 0 else 1
         vehicles_cleared = sum(
-            max(0, int(b) - int(a))
+            max(0, int(b) - int(a)) * (1.0 + int(b) / max_q)
             for b, a in zip(queues_before, queues_after)
         )
-        # outbound_flow: vehicles actively moving out of the junction this step.
-        # This is the truest throughput signal — independent of arrivals.
+        # Normalise outbound_flow per delta_time chunk so longer duration phases
+        # don't auto-earn higher reward just from more elapsed wall time.
+        chunks = duration_steps / self.delta_time
         outbound_flow = sum(
             traci.lane.getLastStepVehicleNumber(l) for l in self.outbound_lanes
-        )
+        ) / chunks
         # remaining_queue: linear penalty for queue length still waiting
         remaining_queue = float(np.sum(queues_after))
         # overflow_penalty: quadratic penalty for any approach above 10 vehicles

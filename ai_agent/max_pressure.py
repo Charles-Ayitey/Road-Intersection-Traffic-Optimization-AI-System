@@ -56,11 +56,13 @@ def compute_pressure(action: int) -> float:
     out_lanes = PHASE_LANE_MAP[action]["out"]
 
     try:
-        inbound  = sum(traci.lane.getLastStepHaltingNumber(l) for l in in_lanes)
-        outbound = sum(traci.lane.getLastStepHaltingNumber(l) for l in out_lanes)
-    except (FatalTraCIError, ConnectionResetError, OSError) as e:
+        inbound  = sum(int(traci.lane.getLastStepHaltingNumber(l) or 0) for l in in_lanes)
+        outbound = sum(int(traci.lane.getLastStepHaltingNumber(l) or 0) for l in out_lanes)
+    except Exception as e:
         log.debug(f"compute_pressure: TraCI unavailable ({e}); returning 0.0")
         return 0.0
+
+    return float(inbound - outbound)
 
 def max_pressure_action() -> tuple[int, dict]:
     """

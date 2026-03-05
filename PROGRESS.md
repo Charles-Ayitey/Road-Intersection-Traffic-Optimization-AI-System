@@ -33,7 +33,27 @@ AI-driven adaptive signal control using YOLOv8 (Computer Vision) and Reinforceme
 ## Phase 5: Dashboard (COMPLETED)
 - [x] **Real-time Interface:** Built Streamlit dashboard in `dashboard/app.py`.
 - [x] **Visualization:** Integrated bar charts and status indicators for live monitoring.
+- [x] **Production Rewrite:** Full rewrite with health panel, 60-s history trend, event log, alert threshold, phase timer, stale-feed warning, and mode-flicker fix.
+
+## Phase 6: Observation & Reward Hardening (COMPLETED)
+- [x] **Upstream detectors:** `junction.add.xml` with 4 E1 induction loops (`det_n/s/e/w`) at pos=33; SUMO config updated.
+- [x] **9-element observation space:** Added occupancy readings per approach; `sumo_env.py` and `colab_train.py` synced.
+- [x] **Dynamic phase duration:** `MultiDiscrete([2, 3])` action space — agent now chooses direction AND green duration (5 s / 15 s / 30 s).
+- [x] **Per-lane congestion-weighted reward:** Vehicles cleared on a congested approach contribute more than on a light approach.
+- [x] **Outbound flow normalization:** Outbound reward divided by `chunks = duration_steps / delta_time` to prevent inflation on long phases.
+- [x] **Max-pressure NoneType fix:** `compute_pressure()` — added missing `return`, `int(... or 0)` guards, widened `except`.
+- [x] **Duplicate log output fix:** `logging.basicConfig(force=True)` prevents double-handler on shared logger.
+- [x] **Colab package rebuilt:** `pack_for_colab.py` run; 45-file zip ready for upload.
+
+## Phase 7: Vision Pipeline & Camera Integration (IN PROGRESS)
+- [x] **EW zone geometry:** `config.json` `traffic_test` zones replaced with 4-arm polygons correctly mapped to N/S/E/W.
+- [x] **`video_list` allowlist:** Scenarios can now restrict the playlist to geometrically compatible overhead videos, preventing street-level Ghanaian footage from corrupting zone counts.
+- [x] **Live camera architecture:** `_is_live_source()`, `process_video()` router, `_process_live_stream()` with reconnect loop, `_process_playlist()` with cap initialisation.
+- [x] **`live_camera` scenario:** RTSP placeholder + `reconnect_on_drop` flag added to `config.json`.
+- [x] **`calibrate_zones.py`:** Interactive OpenCV tool—click zone corners, outputs paste-ready JSON for `config.json`.
+- [ ] **New model training:** Reward formula changed (per-lane weighting + outbound normalisation); `best_model_2.zip` was trained on the old formula. Run `pack_for_colab.py` and re-train.
+- [ ] **Phase 5 (MARL):** Multi-agent reinforcement learning for coordinated control of multiple junctions. Deferred until single-junction performance is stable.
 
 ---
 
-*Last Updated: 2026-02-28*
+*Last Updated: 2026-03-05*

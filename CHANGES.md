@@ -220,3 +220,184 @@ A full rewrite replacing the original 124-line prototype with an operational mon
 | **Stale feed warning** | Yellow banner if vision data has not arrived within `STALE_THRESH = 5.0` seconds |
 | **Session persistence** | `_init_state()` initialises all buffers in `session_state` so history survives rerenders |
 
+---
+---
+
+# Changes — 2026-03-05
+
+**Scope:** Observation hardening, dynamic phase duration, live-run diagnostics, video architecture, real-camera integration.
+
+---
+
+## 13. New Model Checkpoints Integrated (`ai_agent/live_controller.py`)
+
+`MODEL_SEARCH_PATHS` updated with best-checkpoint saves from the EvalCallback — these consistently outperform the final-step saves because they record the agent at its peak evaluation score rather than its last training state.
+
+Full search order:
+```
+1. models/best_model_2.zip          ← best eval checkpoint, latest training run
+2. models/ppo_traffic_agent_refined_4.zip
+3. models/best_model.zip
+4. models/ppo_traffic_agent_refined_3.zip
+5. models/ppo_traffic_agent_refined_2.zip
+6. models/ppo_traffic_agent_refined.zip
+7. models/ppo_traffic_agent.zip
+```
+
+---
+
+## 14. `compute_pressure()` NoneType Fix (`ai_agent/max_pressure.py`)
+
+The max-pressure fallback controller crashed on every step because `compute_pressure()` had a missing `return` statement. The function returned `None` instead of the pressure differential, then `should_override()` called `max()` on a dict of `None` values.
+
+**Changes:**
+- Added `return float(inbound - outbound)` at the correct position in the function body.
+- Added `int(traci.lane.getLastStepHaltingNumber(l) or 0)` guard so a `None` TraCI response is treated as 0 rather than causing a downstream crash.
+- Widened bare `except` to `except Exception` — failures are now caught and logged rather than silently swallowed.
+
+---
+
+## 15. Step 2 — Upstream Induction Loop Detectors
+
+**New file:** `simulation/junction.add.xml`  
+Four E1 induction loops, one per inbound lane, at pos=33 (~60 m upstream of the stop line). Frequency: 5 seconds.
+
+**`simulation/junction.sumocfg`**  
+Added `<additional-files value="junction.add.xml"/>` to load the detector definitions.
+
+**`ai_agent/sumo_env.py`** (and synced into `ai_agent/colab_train.py`):
+- `_write_add_xml()` regenerates `junction.add.xml` at runtime with the OS-appropriate null device (`/dev/null` on Linux, `NUL` on Windows).
+- `self.detector_ids = ["det_n", "det_s", "det_e", "det_w"]`
+- Observation space expanded from 5 to **9 elements**: `[Q_N, Q_S, Q_E, Q_W, Occ_N, Occ_S, Occ_E, Occ_W, phase]`.
+- Occupancy values come from `traci.inductionloop.getLastStepOccupancy(det_id)`.
+
+---
+
+## 16. Step 3 — Dynamic Phase Duration
+
+**`ai_agent/sumo_env.py`** (and synced into `ai_agent/colab_train.py`):
+- `action_space` changed from `Discrete(2)` to `MultiDiscrete([2, 3])`.
+  - `action[0]` = phase direction (0 = NS, 1 = EW).
+  - `action[1]` = duration level → `_DURATION_STEPS = [1, 3, 6]` steps at `delta_time=5`.
+
+**`ai_agent/live_controller.py`**:
+- `dur_idx = int(action[1])`; `dur_label = ["5s", "15s", "30s"][dur_idx]` logged per step.
+- Phase posted to API **before** `env.step()` so dashboard shows the correct green for the full duration.
+- `post_phase_to_api()` skips yellow phases (1, 3).
+- Request timeout increased from 0.1 s to 0.5 s.
+- `logging.basicConfig(force=True)` prevents duplicate log lines from double initialisation.
+
+---
+
+## 17. Per-Lane Congestion-Weighted Reward + Outbound Normalisation
+
+**`ai_agent/sumo_env.py`** and **`ai_agent/colab_train.py`** — reward function updated:
+
+Previous formula:
+```
+reward = vehicles_cleared + 0.5*outbound_flow - 0.3*remaining_queue - 0.5*overflow
+```
+
+New formula:
+```
+reward = cleared_weighted + 0.5*(outbound_flow / chunks) - 0.3*remaining_queue - 0.5*overflow
+
+where:
+  cleared_weighted = Σ  cleared_i × (1 + queue_before_i / max_queue_before)
+  chunks           = duration_steps / delta_time
+```
+
+The congestion weight means that clearing a vehicle from a queue of 18 contributes roughly twice the reward of clearing the same vehicle from a queue of 2. The outbound normalisation divides by the number of simulation substeps executed during the green phase so that a 30-second green does not receive 6× the outbound bonus of a 5-second green.
+
+---
+
+## 18. EW Zone Geometry Fix (`config.json`)
+
+The `traffic_test` scenario previously had four quadrant polygons (`top-left/top-right/bottom-left/bottom-right`), all mapped to `North` or `South`. East and West were absent. All four zones replaced with four arm-shaped polygons extending along each approach direction from the intersection centre, with `map_to` set to `North`, `South`, `East`, and `West`.
+
+---
+
+## 19. Dashboard Duplicate-Code and Phase-Display Fix (`dashboard/app.py`)
+
+A previous automated edit had appended an entire second copy of `app.py` to the end of the file. The duplicate tail contained a simplified phase-display block that unconditionally overrode the correct implementation on every page rerender, locking the display to "NS Green". The duplicate was removed, leaving a single clean implementation.
+
+---
+
+## 20. Video Playlist Architecture — `video_list` Allowlist
+
+**`config.json`**:  
+Added `video_list` field to scenario configurations. When present, the playlist is built from exactly these files (relative paths from the project root). The `traffic_test` scenario lists only the five overhead-compatible intersection videos.
+
+**`vision/detector.py`** — `_discover_videos()` rewritten with the following priority chain:
+1. `scenario.video_list` — if specified, use only these files.
+2. Auto-discover all video files in `data/` — used only when no `video_list` is set.
+3. Fall back to `scenario.source` — used when `data/` is empty.
+
+This prevents the 34 Ghanaian street-level training videos from being ingested by the vision pipeline's top-down zone counter.
+
+---
+
+## 21. Real Camera Integration
+
+**`config.json`** — new `live_camera` scenario:
+```json
+"live_camera": {
+    "source": "rtsp://USERNAME:PASSWORD@CAMERA_IP:554/stream",
+    "reconnect_on_drop": true,
+    "zones": [ ... 4 arm-shaped placeholder polygons ... ]
+}
+```
+Replace the RTSP placeholder with the actual camera address; use `calibrate_zones.py` to generate the zone polygons.
+
+**`vision/detector.py`** — refactored video processing:
+
+| Method | Purpose |
+|---|---|
+| `_is_live_source(source)` | Returns `True` for RTSP URLs, HTTP streams, and integer webcam indices |
+| `process_video(show)` | Router — calls `_process_live_stream()` or `_process_playlist()` |
+| `_process_live_stream(show)` | Outer reconnect loop + inner frame-read loop; logs reconnect events; honours `reconnect_on_drop` from config |
+| `_process_playlist(show)` | Cycles through the video list; rescales zones when clip resolution changes |
+
+**New file:** `vision/calibrate_zones.py`  
+Interactive OpenCV tool for defining zone polygons on a camera frame.
+
+```bash
+# Use active_scenario source from config.json
+python vision/calibrate_zones.py
+
+# Specific scenario
+python vision/calibrate_zones.py --scenario live_camera
+
+# Custom source
+python vision/calibrate_zones.py --source rtsp://192.168.1.100:554/stream
+python vision/calibrate_zones.py --source 0   # webcam index
+```
+
+| Control | Action |
+|---|---|
+| Left-click | Add point to current zone |
+| Right-click | Undo last point |
+| ENTER / N | Close polygon, advance to next arm |
+| R | Reset current arm |
+| S | Save all zones and exit |
+| Q / ESC | Quit without saving |
+
+Output: `vision/zones_calibrated.json` + paste-ready JSON printed to terminal.
+
+---
+
+## Files Changed — 2026-03-05
+
+| File | What Changed |
+|---|---|
+| `ai_agent/live_controller.py` | New model paths; dynamic duration decoding; phase-before-step posting; skip yellows; 0.5 s timeout; `force=True` logging |
+| `ai_agent/max_pressure.py` | Missing `return`; `int(... or 0)` guard; widened `except Exception` |
+| `ai_agent/sumo_env.py` | 9-element obs; `_write_add_xml()`; `MultiDiscrete([2,3])` action; per-lane weighted reward; outbound normalisation |
+| `ai_agent/colab_train.py` | Fully synced with all `sumo_env.py` changes |
+| `simulation/junction.add.xml` | **New** — 4 E1 induction loops |
+| `simulation/junction.sumocfg` | Added `<additional-files>` reference |
+| `config.json` | EW arm zones; `video_list` allowlist; `live_camera` scenario |
+| `dashboard/app.py` | Duplicate code block removed |
+| `vision/detector.py` | `_discover_videos()` with priority chain; `_is_live_source()`; `process_video()` router; `_process_live_stream()`; `_process_playlist()` fixed |
+| `vision/calibrate_zones.py` | **New** — interactive zone calibration tool |
+

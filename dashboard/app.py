@@ -249,7 +249,6 @@ else:
 time.sleep(1)
 st.rerun()
 
-API_BASE = "http://localhost:8000"
 
 def get_data():
     try:
