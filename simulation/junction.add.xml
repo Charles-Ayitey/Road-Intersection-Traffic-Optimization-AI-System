@@ -1,0 +1,17 @@
+<!-- Upstream induction loop detectors — one per inbound approach lane.
+     Position 33 m from lane start = ~60 m upstream of the stop line
+     (inbound lanes are 92.80 m long).
+
+     freq="5": aggregate over 5 simulation seconds (matches delta_time).
+     file="nul": suppress the per-step output file on Windows
+                 (use /dev/null on Linux / Colab).
+
+     Detector readings are read live via TraCI:
+         traci.inductionloop.getLastStepOccupancy(id)   → 0-100 %
+-->
+<additionals>
+    <inductionLoop id="det_n" lane="n2c_0" pos="33" freq="5" file="nul"/>
+    <inductionLoop id="det_s" lane="s2c_0" pos="33" freq="5" file="nul"/>
+    <inductionLoop id="det_e" lane="e2c_0" pos="33" freq="5" file="nul"/>
+    <inductionLoop id="det_w" lane="w2c_0" pos="33" freq="5" file="nul"/>
+</additionals>

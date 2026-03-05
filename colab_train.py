@@ -41,6 +41,9 @@ from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback
 
+# Duration multipliers: level 0 = 5 s, level 1 = 15 s, level 2 = 30 s
+_DURATION_STEPS = [1, 3, 6]
+
 # ── Environment ───────────────────────────────────────────────
 class SumoTrafficEnv(gym.Env):
     """
@@ -59,17 +62,39 @@ class SumoTrafficEnv(gym.Env):
         self.randomise    = randomise_demand
         self.sumo_binary  = "sumo"
 
-        self.action_space = spaces.Discrete(2)
+        # Action: MultiDiscrete([2, 3])
+        #   dim 0 — phase    : 0=NS, 1=EW
+        #   dim 1 — duration : 0=5 s, 1=15 s, 2=30 s
+        self.action_space = spaces.MultiDiscrete([2, 3])
+
+        # Obs (9): [Q_N, Q_S, Q_E, Q_W, Occ_N, Occ_S, Occ_E, Occ_W, phase]
         self.observation_space = spaces.Box(
-            low  = np.array([0, 0, 0, 0, 0], dtype=np.float32),
-            high = np.array([100, 100, 100, 100, 1], dtype=np.float32),
+            low=np.zeros(9, dtype=np.float32),
+            high=np.array([100,100,100,100, 100,100,100,100, 1], dtype=np.float32),
             dtype=np.float32
         )
 
         self.tls_id        = "center"
         self.lanes         = ["n2c_0", "s2c_0", "e2c_0", "w2c_0"]
+        self.outbound_lanes = ["c2n_0", "c2s_0", "c2e_0", "c2w_0"]
+        self.detector_ids  = ["det_n", "det_s", "det_e", "det_w"]
         self.current_phase = 0
         self.yellow_dur    = 3
+        self._write_add_xml()
+
+    # ── Upstream detector setup ───────────────────────────────
+    def _write_add_xml(self):
+        """Write junction.add.xml with the OS-correct null device."""
+        null_dev = os.devnull.replace("\\", "/")
+        add_path = os.path.join(self.sim_dir, "junction.add.xml")
+        with open(add_path, "w") as f:
+            f.write(f"""<additionals>
+    <inductionLoop id="det_n" lane="n2c_0" pos="33" freq="5" file="{null_dev}"/>
+    <inductionLoop id="det_s" lane="s2c_0" pos="33" freq="5" file="{null_dev}"/>
+    <inductionLoop id="det_e" lane="e2c_0" pos="33" freq="5" file="{null_dev}"/>
+    <inductionLoop id="det_w" lane="w2c_0" pos="33" freq="5" file="{null_dev}"/>
+</additionals>
+""")
 
     # ── Domain randomisation ──────────────────────────────────
     def _write_random_routes(self):
@@ -120,11 +145,22 @@ class SumoTrafficEnv(gym.Env):
 
     def _get_obs(self):
         queues   = [traci.lane.getLastStepHaltingNumber(l) for l in self.lanes]
+        try:
+            upstream = [traci.inductionloop.getLastStepOccupancy(d) for d in self.detector_ids]
+        except Exception:
+            upstream = [0.0, 0.0, 0.0, 0.0]
         ai_phase = 0 if self.current_phase in [0, 1] else 1
-        return np.array(queues + [float(ai_phase)], dtype=np.float32)
+        return np.array(queues + upstream + [float(ai_phase)], dtype=np.float32)
 
     def step(self, action):
-        target = 0 if action == 0 else 2
+        if hasattr(action, '__len__'):
+            phase_action   = int(action[0])
+            duration_steps = _DURATION_STEPS[int(action[1])] * self.delta_time
+        else:
+            phase_action   = int(action)
+            duration_steps = self.delta_time
+
+        target = 0 if phase_action == 0 else 2
 
         if target != self.current_phase:
             yellow = 1 if self.current_phase == 0 else 3
@@ -134,15 +170,28 @@ class SumoTrafficEnv(gym.Env):
             self.current_phase = target
             traci.trafficlight.setPhase(self.tls_id, target)
 
-        for _ in range(self.delta_time):
+        # Snapshot queues before running the green phase
+        queues_before = [traci.lane.getLastStepHaltingNumber(l) for l in self.lanes]
+
+        for _ in range(duration_steps):
             traci.simulationStep()
 
-        obs        = self._get_obs()
-        queues     = obs[:4]
-        waiting    = sum(min(traci.lane.getWaitingTime(l), 60.0) for l in self.lanes)
-        queue_pen  = float(np.sum(queues))
-        overflow   = sum(max(0, int(q) - 10) ** 2 for q in queues)
-        reward     = -(queue_pen + 0.05 * waiting + 0.5 * overflow)
+        obs             = self._get_obs()
+        queues_after    = obs[:4]
+        vehicles_cleared = sum(
+            max(0, int(b) - int(a))
+            for b, a in zip(queues_before, queues_after)
+        )
+        outbound_flow   = sum(
+            traci.lane.getLastStepVehicleNumber(l) for l in self.outbound_lanes
+        )
+        remaining_queue = float(np.sum(queues_after))
+        overflow        = sum(max(0, int(q) - 10) ** 2 for q in queues_after)
+        reward          = (
+            (vehicles_cleared + 0.5 * outbound_flow)
+            - 0.3 * remaining_queue
+            - 0.5 * overflow
+        )
         terminated = traci.simulation.getMinExpectedNumber() <= 0
         truncated  = traci.simulation.getTime() > 3600
         return obs, reward, terminated, truncated, {}

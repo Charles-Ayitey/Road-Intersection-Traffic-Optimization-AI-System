@@ -2,6 +2,7 @@
     <input>
         <net-file value="junction.net.xml"/>
         <route-files value="junction.rou.xml"/>
+        <additional-files value="junction.add.xml"/>
     </input>
     <time>
         <begin value="0"/>

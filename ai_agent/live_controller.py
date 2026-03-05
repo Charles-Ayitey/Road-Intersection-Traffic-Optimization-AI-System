@@ -4,22 +4,27 @@ import time
 import logging
 import requests
 import numpy as np
+import traci
 from datetime import datetime
 from stable_baselines3 import PPO
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ai_agent.sumo_env import SumoTrafficEnv
+from ai_agent.max_pressure import should_override
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
 API_URL = "http://localhost:8000"
-# If any single approach queue exceeds this threshold the controller forces a
-# phase switch regardless of what the model says, preventing catastrophic buildup.
-MAX_QUEUE_OVERRIDE = 15
+# Minimum pressure advantage the max-pressure controller must have over the
+# model's chosen phase before it overrides.  Set higher to trust the model more,
+# lower to lean on max pressure more aggressively.
+MP_OVERRIDE_THRESHOLD = 5.0
 # Search order: try refined model first, fall back to base training output
 MODEL_SEARCH_PATHS = [
-    os.path.join("models", "ppo_traffic_agent_refined_2.zip"),  # latest Colab run
+    os.path.join("models", "best_model.zip"),                   # best eval checkpoint (throughput reward)
+    os.path.join("models", "ppo_traffic_agent_refined_3.zip"),  # final model (throughput reward)
+    os.path.join("models", "ppo_traffic_agent_refined_2.zip"),
     os.path.join("models", "ppo_traffic_agent_refined.zip"),
     os.path.join("models", "ppo_traffic_agent.zip"),
 ]
@@ -73,12 +78,12 @@ class LiveRLController:
         """
         if obs_vision is None:
             return obs_sim
-        merged = obs_sim.copy()
-        for i in range(4):   # indices 0-3 are N, S, E, W queue counts
+        merged = obs_sim.copy()     # starts with full 9-element SUMO obs
+        for i in range(4):          # indices 0-3: queue counts from vision if non-zero
             if obs_vision[i] > 0:
                 merged[i] = obs_vision[i]
-        # Always keep the phase element from SUMO (ground truth)
-        merged[4] = obs_sim[4]
+        # Indices 4-7 (upstream occupancy) and 8 (phase) are always from SUMO
+        merged[8] = obs_sim[8]
         return merged
 
     def post_phase_to_api(self, phase_id):
@@ -88,19 +93,21 @@ class LiveRLController:
             log.debug(f"Phase post failed: {e}")
 
     def _fixed_timing_action(self, step):
-        """Alternate NS/EW every FIXED_TIMING_INTERVAL steps."""
-        return 0 if (step // FIXED_TIMING_INTERVAL) % 2 == 0 else 1
+        """Alternate NS/EW every FIXED_TIMING_INTERVAL steps, medium duration."""
+        phase = 0 if (step // FIXED_TIMING_INTERVAL) % 2 == 0 else 1
+        return np.array([phase, 1], dtype=np.int64)  # duration_level 1 = 15 s
 
     def _manual_action_from_api(self):
-        """Read the phase the dashboard operator has set."""
+        """Read the phase the dashboard operator has set, medium duration."""
         try:
             r = requests.get(f"{API_URL}/dashboard_data", timeout=0.5)
             r.raise_for_status()
-            return 0 if r.json().get("manual_phase", 0) in [0, 1] else 1
+            phase = 0 if r.json().get("manual_phase", 0) in [0, 1] else 1
         except requests.RequestException:
-            return 0
+            phase = 0
+        return np.array([phase, 1], dtype=np.int64)  # duration_level 1 = 15 s
 
-    def _save_results(self, records, start_time, model_path):
+    def _save_results(self, records, start_time, model_path, override_count=0):
         """Write a summary report to results/simulation_<timestamp>.txt."""
         os.makedirs("results", exist_ok=True)
         timestamp = start_time.strftime("%Y%m%d_%H%M%S")
@@ -135,6 +142,7 @@ class LiveRLController:
             f.write(f"  Average reward/step  : {sum(rewards)/total_steps:.2f}\n")
             f.write(f"  Best  reward (step)  : {max(rewards):.2f}  (step {rewards.index(max(rewards))+1})\n")
             f.write(f"  Worst reward (step)  : {min(rewards):.2f}  (step {rewards.index(min(rewards))+1})\n")
+            f.write(f"  Max pressure overrides: {override_count} steps ({100*override_count/total_steps:.1f}%)\n")
             f.write("\n")
             f.write("  Average queue lengths:\n")
             f.write(f"    North : {sum(q_n)/total_steps:.2f}  (peak {max(q_n)})\n")
@@ -149,16 +157,17 @@ class LiveRLController:
 
             # ── Per-step log ────────────────────────────────────────
             f.write("PER-STEP LOG\n")
-            f.write("-" * 70 + "\n")
-            f.write(f"{'Step':>5}  {'Mode':<18} {'Action':<13} {'N':>4} {'S':>4} {'E':>4} {'W':>4}  {'Reward':>9}\n")
-            f.write("-" * 70 + "\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"{'Step':>5}  {'Mode':<18} {'Action':<13} {'Dur':>5} {'N':>4} {'S':>4} {'E':>4} {'W':>4}  {'Reward':>9}\n")
+            f.write("-" * 80 + "\n")
             for r in records:
                 f.write(
                     f"{r['step']:>5}  {r['mode']:<18} {r['action']:<13} "
+                    f"{r.get('duration', '?'):>5} "
                     f"{r['q_n']:>4} {r['q_s']:>4} {r['q_e']:>4} {r['q_w']:>4}  "
                     f"{r['reward']:>9.2f}\n"
                 )
-            f.write("-" * 70 + "\n")
+            f.write("-" * 80 + "\n")
 
         log.info(f"Results saved → {out_path}")
         return out_path
@@ -170,9 +179,11 @@ class LiveRLController:
 
         start_time = datetime.now()
         records = []
+        override_count = 0
         obs_sim, _ = self.env.reset()
 
         for i in range(steps):
+            overridden = False   # reset each step; set True by max pressure if triggered
             mode = self._get_mode()
             obs_vision = self.get_state_from_api()
             current_obs = self._merge_obs(obs_vision, obs_sim)
@@ -185,36 +196,44 @@ class LiveRLController:
             else:  # AI Controlled (default)
                 action, _ = self.model.predict(current_obs, deterministic=True)
 
-                # Safety valve: if any queue is critically long, force the
-                # opposite phase to prevent runaway buildup.
-                q_ns = int(current_obs[0]) + int(current_obs[1])  # N + S
-                q_ew = int(current_obs[2]) + int(current_obs[3])  # E + W
-                if action == 0 and q_ew > MAX_QUEUE_OVERRIDE and q_ew > q_ns:
-                    log.warning(f"Step {i+1}: E/W queue {q_ew} > {MAX_QUEUE_OVERRIDE}; overriding to EAST-WEST")
-                    action = 1
-                elif action == 1 and q_ns > MAX_QUEUE_OVERRIDE and q_ns > q_ew:
-                    log.warning(f"Step {i+1}: N/S queue {q_ns} > {MAX_QUEUE_OVERRIDE}; overriding to NORTH-SOUTH")
-                    action = 0
+                # Max pressure override: only the phase dimension is overridden;
+                # the model's chosen duration is preserved.
+                try:
+                    if traci.isLoaded():
+                        overridden, mp_phase, pressures = should_override(
+                            int(action[0]), threshold=MP_OVERRIDE_THRESHOLD
+                        )
+                        if overridden:
+                            action = np.array([mp_phase, action[1]], dtype=np.int64)
+                            override_count += 1
+                except Exception as mp_err:
+                    log.warning(f"Max pressure check failed (TraCI gone?): {mp_err}")
 
-            action_name = "NORTH-SOUTH" if action == 0 else "EAST-WEST"
+            phase_idx   = int(action[0])
+            dur_idx     = int(action[1]) if hasattr(action, '__len__') else 1
+            action_name = "NORTH-SOUTH" if phase_idx == 0 else "EAST-WEST"
+            dur_label   = ["5s", "15s", "30s"][dur_idx]
             obs_sim, reward, term, trunc, _ = self.env.step(action, callback=self.post_phase_to_api)
 
             q = current_obs[:4]
             records.append({
-                "step"  : i + 1,
-                "mode"  : mode,
-                "action": action_name,
-                "q_n"   : int(q[0]),
-                "q_s"   : int(q[1]),
-                "q_e"   : int(q[2]),
-                "q_w"   : int(q[3]),
-                "reward": float(reward),
+                "step"      : i + 1,
+                "mode"      : mode,
+                "action"    : action_name,
+                "duration"  : dur_label,
+                "q_n"       : int(q[0]),
+                "q_s"       : int(q[1]),
+                "q_e"       : int(q[2]),
+                "q_w"       : int(q[3]),
+                "reward"    : float(reward),
+                "mp_override": overridden if mode == "AI Controlled" else False,
             })
 
             log.info(
-                f"Step {i+1:3} | Mode: {mode:16} | ACTION: {action_name:11} | "
+                f"Step {i+1:3} | Mode: {mode:16} | ACTION: {action_name:11} [{dur_label}] | "
                 f"QUEUES [N:{int(q[0]):2} S:{int(q[1]):2} E:{int(q[2]):2} W:{int(q[3]):2}] | "
                 f"REWARD: {reward:7.2f}"
+                + (" [MP]" if records[-1]["mp_override"] else "")
             )
 
             self.post_phase_to_api(self.env.current_phase)
@@ -226,7 +245,7 @@ class LiveRLController:
 
         self.env.close()
         if records:
-            self._save_results(records, start_time, self.model_path)
+            self._save_results(records, start_time, self.model_path, override_count)
         log.info("=" * 60 + "\nTest Complete.\n")
 
 

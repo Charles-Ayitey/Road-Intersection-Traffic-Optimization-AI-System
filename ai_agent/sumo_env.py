@@ -7,6 +7,12 @@ from gymnasium import spaces
 import numpy as np
 import traci
 
+# Duration multipliers for each duration-level action.
+# Level 0 = 1 × delta_time = 5 s  (short green — high-flow phases)
+# Level 1 = 3 × delta_time = 15 s (medium — default)
+# Level 2 = 6 × delta_time = 30 s (long    — heavy-load phases)
+_DURATION_STEPS = [1, 3, 6]
+
 class SumoTrafficEnv(gym.Env):
     def __init__(self, sumocfg_path, use_gui=False, delta_time=5, randomise_demand=False):
         super(SumoTrafficEnv, self).__init__()
@@ -35,19 +41,52 @@ class SumoTrafficEnv(gym.Env):
             if tools not in sys.path:
                 sys.path.append(tools)
 
-        self.action_space = spaces.Discrete(2)
+        # Action space — two independent discrete dimensions:
+        #   dim 0: phase selection  0=NORTH-SOUTH, 1=EAST-WEST
+        #   dim 1: duration level   0=5 s, 1=15 s, 2=30 s
+        self.action_space = spaces.MultiDiscrete([2, 3])
 
-        # Obs: [Q_N, Q_S, Q_E, Q_W, Current_Phase_ID]
+        # Observation space (9 elements):
+        #   [Q_N, Q_S, Q_E, Q_W,          ← stop-line queue counts (0-100 veh)
+        #    Occ_N, Occ_S, Occ_E, Occ_W,  ← upstream loop occupancy (0-100 %)
+        #    phase]                         ← current AI phase (0=NS, 1=EW)
         self.observation_space = spaces.Box(
-            low=np.array([0, 0, 0, 0, 0], dtype=np.float32),
-            high=np.array([100, 100, 100, 100, 3], dtype=np.float32),
+            low=np.zeros(9, dtype=np.float32),
+            high=np.array([100, 100, 100, 100, 100, 100, 100, 100, 1], dtype=np.float32),
             dtype=np.float32
         )
 
         self.tls_id = "center"
+        # Inbound approach lanes (vehicles queuing before the stop line)
         self.lanes = ["n2c_0", "s2c_0", "e2c_0", "w2c_0"]
+        # Outbound departure lanes (vehicles leaving the junction)
+        self.outbound_lanes = ["c2n_0", "c2s_0", "c2e_0", "c2w_0"]
+        # Upstream induction loop detectors (~60 m before stop line)
+        self.detector_ids = ["det_n", "det_s", "det_e", "det_w"]
         self.current_phase = 0
         self.yellow_duration = 3
+        # Write junction.add.xml with the correct null-device path for the
+        # current OS so SUMO doesn't try to create a literal 'nul' file.
+        self._write_add_xml()
+
+    def _write_add_xml(self):
+        """Write simulation/junction.add.xml with the OS-correct null device.
+
+        SUMO's E1 (inductionLoop) detectors must point to an output file; we
+        direct output to the null device so no disk I/O accumulates during
+        training/live runs.  os.devnull is 'nul' on Windows and '/dev/null'
+        on Linux/macOS.
+        """
+        null_dev = os.devnull.replace("\\", "/")
+        add_path = os.path.join(self.sim_dir, "junction.add.xml")
+        with open(add_path, "w") as f:
+            f.write(f"""<additionals>
+    <inductionLoop id="det_n" lane="n2c_0" pos="33" freq="5" file="{null_dev}"/>
+    <inductionLoop id="det_s" lane="s2c_0" pos="33" freq="5" file="{null_dev}"/>
+    <inductionLoop id="det_e" lane="e2c_0" pos="33" freq="5" file="{null_dev}"/>
+    <inductionLoop id="det_w" lane="w2c_0" pos="33" freq="5" file="{null_dev}"/>
+</additionals>
+""")
 
     def _generate_random_routes(self):
         """
@@ -100,15 +139,31 @@ class SumoTrafficEnv(gym.Env):
 
     def _get_obs(self):
         queues = [traci.lane.getLastStepHaltingNumber(l) for l in self.lanes]
+        try:
+            upstream = [traci.inductionloop.getLastStepOccupancy(d) for d in self.detector_ids]
+        except Exception:
+            upstream = [0.0, 0.0, 0.0, 0.0]  # safe fallback if detectors not loaded
         ai_phase = 0 if self.current_phase in [0, 1] else 1
-        return np.array(queues + [float(ai_phase)], dtype=np.float32)
+        return np.array(queues + upstream + [float(ai_phase)], dtype=np.float32)
 
     def step(self, action, callback=None):
         """
-        Modified step that takes an optional callback to report 
-        intermediate phases (like Yellow) to the API.
+        Extended step that takes a MultiDiscrete action [phase, duration_level].
+
+        action[0] : 0 = NORTH-SOUTH, 1 = EAST-WEST
+        action[1] : 0 = 5 s (1×delta_time), 1 = 15 s (3×delta_time),
+                    2 = 30 s (6×delta_time)
+
+        Also accepts a plain int 0/1 for backward-compat with manual/fixed-timing.
         """
-        target_sumo_phase = 0 if action == 0 else 2
+        if hasattr(action, '__len__'):
+            phase_action   = int(action[0])
+            duration_steps = _DURATION_STEPS[int(action[1])] * self.delta_time
+        else:
+            phase_action   = int(action)
+            duration_steps = self.delta_time  # default medium
+
+        target_sumo_phase = 0 if phase_action == 0 else 2
         
         # 1. Handle Yellow Transition
         if target_sumo_phase != self.current_phase:
@@ -128,23 +183,39 @@ class SumoTrafficEnv(gym.Env):
             traci.trafficlight.setPhase(self.tls_id, target_sumo_phase)
             if callback: callback(self.current_phase)
 
-        # 3. Run Green Duration
-        for _ in range(self.delta_time):
+        # 3. Snapshot queues BEFORE running green — needed for throughput calculation
+        queues_before = [traci.lane.getLastStepHaltingNumber(l) for l in self.lanes]
+
+        # 4. Run Green Duration (variable: 5 s / 15 s / 30 s)
+        for _ in range(duration_steps):
             traci.simulationStep()
-            
+
         obs = self._get_obs()
-        queues = obs[:4]
-        # Waiting time is cumulative (seconds per lane). Cap each lane at 60 s so
-        # one very patient vehicle doesn't dominate and escalate the reward into
-        # the hundreds — that obscures the queue-length signal the agent needs.
-        waiting = sum(min(traci.lane.getWaitingTime(l), 60.0) for l in self.lanes)
-        # Linear queue penalty
-        queue_penalty = float(np.sum(queues))
-        # Extra quadratic penalty for any approach queue above 10 vehicles to
-        # strongly discourage catastrophic build-up (previously the linear term
-        # treated queue=15 only slightly worse than queue=10).
-        overflow_penalty = sum(max(0, int(q) - 10) ** 2 for q in queues)
-        reward = -(queue_penalty + 0.05 * waiting + 0.5 * overflow_penalty)
+        queues_after = obs[:4]
+
+        # ── Throughput reward ────────────────────────────────────────────────
+        # vehicles_cleared: queue reduction on each approach (clamped to 0 so
+        #   new arrivals during the phase don't produce a negative contribution).
+        vehicles_cleared = sum(
+            max(0, int(b) - int(a))
+            for b, a in zip(queues_before, queues_after)
+        )
+        # outbound_flow: vehicles actively moving out of the junction this step.
+        # This is the truest throughput signal — independent of arrivals.
+        outbound_flow = sum(
+            traci.lane.getLastStepVehicleNumber(l) for l in self.outbound_lanes
+        )
+        # remaining_queue: linear penalty for queue length still waiting
+        remaining_queue = float(np.sum(queues_after))
+        # overflow_penalty: quadratic penalty for any approach above 10 vehicles
+        # to strongly discourage runaway build-up.
+        overflow_penalty = sum(max(0, int(q) - 10) ** 2 for q in queues_after)
+
+        reward = (
+            (vehicles_cleared + 0.5 * outbound_flow)   # throughput gains
+            - 0.3 * remaining_queue                     # queue cost
+            - 0.5 * overflow_penalty                    # overflow deterrent
+        )
         terminated = traci.simulation.getMinExpectedNumber() <= 0
         truncated = traci.simulation.getTime() > 3600
         
