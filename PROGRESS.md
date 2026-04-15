@@ -18,6 +18,10 @@ AI-driven adaptive signal control using YOLOv8 (Computer Vision) and Reinforceme
 - [x] **ROI Calibration:** Defined initial quadrants and verified counting logic on user-provided image.
 - [x] **Video Processing:** Integrated frame-by-frame processing into the live system.
 
+## Phase 3: Reporting & Persistence (IN PROGRESS)
+- [x] **Database Setup:** Added `sqlite3` data persistence to `api/main.py` enabling offline/historical data logging and system-state retention.
+- [x] **Log Improvements:** Fixed `launch_system.py` swallowing vital crash logs.
+
 ## Phase 3: AI Agent Development (COMPLETED)
 - [x] **Environment Refinement:** Updated `sumo_env.py` with yellow phases (3s) and decision intervals (5s).
 - [x] **Observation Space:** Expanded state space to include queue lengths and current traffic light phase.

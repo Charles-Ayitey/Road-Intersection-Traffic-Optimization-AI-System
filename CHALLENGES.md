@@ -51,6 +51,14 @@ Debug-level messages (minor failures, phase-post retries) use `log.debug()` so t
 
 ---
 
+### C-05 — Loss of Historical Analytics
+**File:** `api/main.py`
+**Symptom:** Training metrics were saved in TensorBoard, but there was no history of past traffic flow, phases, or queue states over weeks or months.  Any system restart wiped out analytical data from the API endpoint.
+**Root cause:** The API endpoint `traffic_system_state` was purely an in-memory Python dictionary.
+**Resolution:** Implemented `sqlite3` in the API to log `data/traffic_history.db` with a `live_traffic_log` table storing `timestamp`, `north`, `south`, `east`, `west`, `current_phase`, and `mode`. Also resolved a logging swallowing issue in `launch_system.py`.
+
+---
+
 ### C-05 — Deprecated Streamlit API Flooded the Log File
 **File:** `dashboard/app.py`  
 **Symptom:** `dashboard_log.txt` grew to 5,000+ lines containing only the same deprecation warning repeated:

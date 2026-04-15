@@ -48,6 +48,16 @@ This log records the chronological steps and technical actions taken during the 
   - `ai_agent/train.py` — dual saves on every run: timestamped archive copy + rolling `ppo_traffic_agent.zip` latest.
   - `vision/detector.py` — proper `requests.RequestException` handling; consistent `logging` module usage.
   - `simulation/junction.rou.xml` — rewrote uniform 300 veh/hr flows as 5-period time-varying profile (off-peak → morning rush → midday → evening rush → wind-down) with directional imbalance.
+
+---
+
+### **Date: 2026-04-15**
+
+#### **Step 7: Local Database Persistence**
+- **Action:** Added `sqlite3` integration to `api/main.py` so that traffic states (queues, mode, phase) are saved instead of being kept only in volatile memory.
+- **Action:** Created the `live_traffic_log` table inside `data/traffic_history.db`, which logs incoming `VisionUpdate` payloads.
+- **Outcome:** The system is now capable of persisting historical simulation data for potential offline reinforcement learning or time-series analytics.
+- **Action:** Fixed `launch_system.py` swallowing crash logs and updated `config.json`'s `active_scenario` to ensure video loops successfully processed simulated dataset videos.
 - **New file:** `CHANGES.md` — plain-language documentation of all six fix categories.
 - **Outcome:** All 7 issues resolved; no Pylance errors on any modified file.
 

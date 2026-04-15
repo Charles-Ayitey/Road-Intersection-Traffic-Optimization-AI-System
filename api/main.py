@@ -3,9 +3,37 @@ from pydantic import BaseModel
 from typing import Dict
 import time
 import logging
+import sqlite3
+import aiosqlite
+import os
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
+
+# --- SQLite Setup ---
+os.makedirs("data", exist_ok=True)
+DB_PATH = "data/traffic_history.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS live_traffic_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp REAL,
+            north INTEGER,
+            south INTEGER,
+            east INTEGER,
+            west INTEGER,
+            current_phase INTEGER,
+            mode TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
+# --------------------
 
 app = FastAPI()
 
@@ -47,13 +75,32 @@ def reset_state():
     return {"status": "cleared"}
 
 @app.post("/update_counts")
-def update_counts(data: VisionUpdate):
+async def update_counts(data: VisionUpdate):
     global traffic_system_state
     for direction, count in data.counts.items():
         if direction in traffic_system_state["counts"]:
             traffic_system_state["counts"][direction] = count
     traffic_system_state["last_vision_update"] = data.timestamp
     traffic_system_state["system_status"] = "Active"
+    
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT INTO live_traffic_log (timestamp, north, south, east, west, current_phase, mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                data.timestamp,
+                traffic_system_state["counts"]["North"],
+                traffic_system_state["counts"]["South"],
+                traffic_system_state["counts"]["East"],
+                traffic_system_state["counts"]["West"],
+                traffic_system_state["current_phase"],
+                traffic_system_state["mode"]
+            ))
+            await db.commit()
+    except Exception as e:
+        log.error(f"Failed to log to SQLite: {e}")
+
     return {"status": "ok"}
 
 @app.post("/set_mode")
@@ -93,6 +140,20 @@ def set_action(data: AgentAction):
 @app.get("/dashboard_data")
 def dashboard_data():
     return traffic_system_state
+
+@app.get("/history")
+async def get_history(limit: int = 100):
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM live_traffic_log ORDER BY timestamp DESC LIMIT ?", (limit,)
+            )
+            rows = await cursor.fetchall()
+            return {"status": "ok", "data": [dict(row) for row in rows]}
+    except Exception as e:
+        log.error(f"Failed to fetch history from SQLite: {e}")
+        return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
