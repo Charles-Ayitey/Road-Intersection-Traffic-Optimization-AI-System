@@ -38,6 +38,7 @@ init_db()
 app = FastAPI()
 
 def get_empty_state():
+    now = time.time()
     return {
         "counts": {"North": 0, "South": 0, "East": 0, "West": 0},
         "current_phase": 0,
@@ -45,7 +46,9 @@ def get_empty_state():
         "last_agent_action": 0,
         "system_status": "Starting...",
         "mode": "AI Controlled",
-        "manual_phase": 0
+        "manual_phase": 0,
+        "last_green_ts": {"0": now, "2": now},
+        "active_override": {"phase": None, "expires_at": 0.0}
     }
 
 traffic_system_state = get_empty_state()
@@ -63,6 +66,17 @@ class ModeUpdate(BaseModel):
 
 class PhaseUpdate(BaseModel):
     phase: int  # 0 = NS Green, 2 = EW Green
+
+class OverrideRequest(BaseModel):
+    phase: int
+    duration: int
+
+def record_phase_change(new_phase: int):
+    # Only update the timestamp if we are literally changing into this phase
+    # Actually, we want to track "since it was last green".
+    # So if it's currently green, the wait time is 0.
+    # Therefore, we continuously update the TS for the CURRENT green phase.
+    pass # Wait, it's better to update last_green_ts continuously for the active phase.
 
 @app.get("/")
 def read_root():
@@ -82,6 +96,10 @@ async def update_counts(data: VisionUpdate):
             traffic_system_state["counts"][direction] = count
     traffic_system_state["last_vision_update"] = data.timestamp
     traffic_system_state["system_status"] = "Active"
+    
+    # Update the last green timestamp for whichever phase is currently active
+    current_phase = str(traffic_system_state["current_phase"])
+    traffic_system_state["last_green_ts"][current_phase] = data.timestamp
     
     try:
         async with aiosqlite.connect(DB_PATH) as db:
@@ -122,6 +140,20 @@ def set_phase(data: PhaseUpdate):
     traffic_system_state["manual_phase"] = data.phase
     log.info(f"Manual phase set to: {data.phase}")
     return {"status": "ok", "manual_phase": data.phase}
+
+@app.post("/trigger_override")
+def trigger_override(data: OverrideRequest):
+    """Used for temporary Quick Overrides (like pedestrian or emergency) without fully breaking AI mode."""
+    global traffic_system_state
+    if data.phase not in [0, 2]:
+        return {"status": "error", "message": "Phase must be 0 (NS Green) or 2 (EW Green)"}
+    
+    expires = time.time() + data.duration
+    traffic_system_state["active_override"]["phase"] = data.phase
+    traffic_system_state["active_override"]["expires_at"] = expires
+    
+    log.info(f"Quick override triggered for Phase {data.phase} for {data.duration} seconds.")
+    return {"status": "ok", "expires_at": expires}
 
 @app.get("/get_state")
 def get_state():

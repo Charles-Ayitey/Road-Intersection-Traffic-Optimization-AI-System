@@ -61,3 +61,6 @@ AI-driven adaptive signal control using YOLOv8 (Computer Vision) and Reinforceme
 ---
 
 *Last Updated: 2026-03-05*
+- [X] Update ai_agent/live_controller.py to handle active_override from API
+- [X] Provide Starvation tracking and Quick Override Buttons on dashboard/app.py
+- [X] Smooth visualization update

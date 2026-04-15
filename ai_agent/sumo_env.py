@@ -101,7 +101,7 @@ class SumoTrafficEnv(gym.Env):
             "w2e": random.randint(50, 900),
         }
         xml = f"""<routes>
-    <vType id="car" accel="2.6" decel="4.5" sigma="0.5" length="5" minGap="2.5" maxSpeed="13.89" guiShape="passenger"/>
+    <vType id="car" carFollowModel="IDM" accel="2.6" decel="4.5" sigma="0.2" length="5" minGap="2.0" maxSpeed="13.89" guiShape="passenger"/>
     <route id="n2s" edges="n2c c2s"/>
     <route id="s2n" edges="s2c c2n"/>
     <route id="e2w" edges="e2c c2w"/>
@@ -128,6 +128,8 @@ class SumoTrafficEnv(gym.Env):
         sumo_cmd = [
             self.sumo_binary, "-c", self.sumocfg_path,
             "--no-warnings", "--waiting-time-memory", "1000",
+            "--time-to-teleport", "-1",        # Smooth traffic: Do not teleport vehicles
+            "--step-length", "0.1",            # 10x smoother physical steps (important for rendering realism)
             "--seed", str(seed) if seed is not None else "42",
             "--start"
         ]
@@ -175,7 +177,7 @@ class SumoTrafficEnv(gym.Env):
             # Report Yellow to API via callback
             if callback: callback(self.current_phase)
             
-            for _ in range(self.yellow_duration):
+            for _ in range(self.yellow_duration * 10): # *10 because step=0.1s
                 traci.simulationStep()
             
             # 2. Switch to Target Green
@@ -187,7 +189,7 @@ class SumoTrafficEnv(gym.Env):
         queues_before = [traci.lane.getLastStepHaltingNumber(l) for l in self.lanes]
 
         # 4. Run Green Duration (variable: 5 s / 15 s / 30 s)
-        for _ in range(duration_steps):
+        for _ in range(duration_steps * 10): # *10 because step=0.1s
             traci.simulationStep()
 
         obs = self._get_obs()

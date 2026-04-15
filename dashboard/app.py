@@ -54,6 +54,12 @@ def set_phase(phase: int):
     except Exception:
         pass
 
+def trigger_override(phase: int, duration: int):
+    try:
+        requests.post(f"{API_BASE}/trigger_override", json={"phase": phase, "duration": duration}, timeout=1.0)
+    except Exception:
+        pass
+
 def check_api_health():
     try:
         requests.get(f"{API_BASE}/", timeout=0.3)
@@ -96,6 +102,18 @@ if system_mode == "Manual Override":
     if st.sidebar.button("🟢 Set EAST-WEST Green", use_container_width=True):
         set_phase(2)
         _log_alert("Manual override → EAST-WEST Green")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Quick Overrides (Temp)")
+col_qo1, col_qo2 = st.sidebar.columns(2)
+with col_qo1:
+    if st.button("🚨 NS 15s", help="Force North-South green for 15s"):
+        trigger_override(0, 15)
+        _log_alert("Quick Override → NS (15s)")
+with col_qo2:
+    if st.button("🚨 EW 15s", help="Force East-West green for 15s"):
+        trigger_override(2, 15)
+        _log_alert("Quick Override → EW (15s)")
 
 st.sidebar.markdown("---")
 
@@ -153,6 +171,9 @@ if data:
             _log_alert(f"⚠ High queue on {d}: {v} vehicles")
 
     phase_secs = int(time.time() - st.session_state["phase_start"])
+    last_green = data.get("last_green_ts", {"0": time.time(), "2": time.time()})
+    wait_ns = int(time.time() - last_green.get("0", time.time()))
+    wait_ew = int(time.time() - last_green.get("2", time.time()))
 
     # ── Row 1: KPI strip ──────────────────────────────────────
     k1, k2, k3, k4, k5, k6 = st.columns(6)
@@ -161,8 +182,8 @@ if data:
     with k2: st.metric("South Queue",     counts["South"])
     with k3: st.metric("East Queue",      counts["East"])
     with k4: st.metric("West Queue",      counts["West"])
-    with k5: st.metric("Total Vehicles",  total_q)
-    with k6: st.metric("Phase Active",    f"{phase_secs}s")
+    with k5: st.metric("NS Wait Time",  f"{wait_ns}s", delta="Starving" if wait_ns > 45 else None, delta_color="inverse")
+    with k6: st.metric("EW Wait Time",  f"{wait_ew}s", delta="Starving" if wait_ew > 45 else None, delta_color="inverse")
 
     st.markdown("---")
 
@@ -181,6 +202,12 @@ if data:
             phase_name = "EAST-WEST"
 
         st.info(f"Active for **{phase_secs}s** ({phase_name})")
+        
+        active_override = data.get("active_override", {})
+        if active_override.get("phase") is not None and active_override.get("expires_at", 0) > time.time():
+            rem = int(active_override["expires_at"] - time.time())
+            ovr_name = "NS" if active_override["phase"] == 0 else "EW"
+            st.warning(f"🚨 Quick Override active: {ovr_name} ({rem}s rem)")
 
         if last_sync > 0:
             st.caption(f"Last vision sync: {datetime.fromtimestamp(last_sync).strftime('%H:%M:%S')}")

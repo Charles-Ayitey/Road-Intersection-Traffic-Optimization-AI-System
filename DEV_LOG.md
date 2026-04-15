@@ -194,6 +194,22 @@ User ran 116-step live session and identified five issues:
   - Usage: `python vision/calibrate_zones.py [--scenario NAME] [--source PATH] [--arms N S E W]`
 - **Files changed / created:** `vision/detector.py`, `vision/calibrate_zones.py`, `config.json`
 
+#### **Step 19: Dashboard Starvation Metrics & Quick Override Logic**
+- **Action:** Added a `trigger_override` endpoint to `api/main.py`.
+- **Action:** Updated `ai_agent/live_controller.py` to intercept the AI's predictions if a valid `active_override` exists in the dashboard state, forcing the requested phase.
+- **Action:** Updated `dashboard/app.py` to calculate starvation time (time since a phase was last green) actively, and provided Quick Override buttons (🚨 15s) for instant operator intervention without permanently leaving AI Mode.
+
+#### **Step 20: Visual Smoothing & Physics Fidelity (Presentation Polish)**
+- **Problem observed:** SUMO's native 1-second simulation steps resulted in erratic, jumpy vehicle movements that looked unnatural on-screen.
+- **Action:** Modified `simulation/junction.sumocfg` and `simulation/rl-tests.sumocfg` to lower `--step-length` to `0.1` seconds, creating 10 interpolation frames per simulation second.
+- **Action:** Set `--time-to-teleport -1` to prevent vehicles from magically vanishing when stuck in queues.
+- **Action:** In `simulation/junction.rou.xml`, switched the `car` vType to use the `IDM` (Intelligent Driver Model) car-following algorithm. Reduced `sigma` from 0.5 to 0.2 and `minGap` to 2.0 to tighten stop-and-go clusters and stop drivers from bouncing jerkily behind leaders.
+- **Action:** Updated the green phase multipliers in `ai_agent/sumo_env.py` to accurately iterate `duration_steps * 10` due to the new 0.1s step scaling.
+- **Outcome:** The SUMO GUI rendering is now cinematic, buttery smooth, and accurately mimics realistic car-following compressions without stutter steps.
+
 ---
 
 *Log will be updated after every significant technical step.*
+Modified Dashboard GUI to track Starvation metrics and Quick Override interactions
+Added IDM car-following physics and 0.1s step interpolation to eliminate erratic vehicle jitter.
+Added IDM physics and teleport settings to rl-tests.sumocfg

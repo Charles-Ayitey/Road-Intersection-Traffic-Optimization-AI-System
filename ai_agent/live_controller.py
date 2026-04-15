@@ -51,13 +51,18 @@ class LiveRLController:
             "Run ai_agent/train.py first to generate a model."
         )
 
-    def _get_mode(self):
+    def _get_api_state(self):
         try:
             r = requests.get(f"{API_URL}/dashboard_data", timeout=0.5)
             r.raise_for_status()
-            return r.json().get("mode", "AI Controlled")
+            return r.json()
         except requests.RequestException:
-            return "AI Controlled"  # safe default
+            return {}  # safe default
+
+    def _manual_action_from_api(self, dashboard_state):
+        """Read the phase the dashboard operator has set, medium duration."""
+        phase = 0 if dashboard_state.get("manual_phase", 0) in [0, 1] else 1
+        return np.array([phase, 1], dtype=np.int64)  # duration_level 1 = 15 s
 
     def get_state_from_api(self):
         try:
@@ -190,15 +195,29 @@ class LiveRLController:
 
         for i in range(steps):
             overridden = False   # reset each step; set True by max pressure if triggered
-            mode = self._get_mode()
+            
+            dashboard_state = self._get_api_state()
+            mode = dashboard_state.get("mode", "AI Controlled")
+            quick_override_phase = None
+            
+            # Check for Quick Override (Emergency / Pedestrian)
+            active_override = dashboard_state.get("active_override", {})
+            if active_override.get("phase") is not None and active_override.get("expires_at", 0) > time.time():
+                quick_override_phase = active_override.get("phase")
+            
             obs_vision = self.get_state_from_api()
             current_obs = self._merge_obs(obs_vision, obs_sim)
 
             # Choose action based on operating mode
-            if mode == "Fixed Timing":
+            if quick_override_phase is not None:
+                # Force the phase but keep a medium duration level
+                override_phase_idx = 0 if quick_override_phase == 0 else 1
+                action = np.array([override_phase_idx, 1], dtype=np.int64)
+                mode = "Quick Override"  # Temp mode string for logging
+            elif mode == "Fixed Timing":
                 action = self._fixed_timing_action(i)
             elif mode == "Manual Override":
-                action = self._manual_action_from_api()
+                action = self._manual_action_from_api(dashboard_state)
             else:  # AI Controlled (default)
                 action, _ = self.model.predict(current_obs, deterministic=True)
 
