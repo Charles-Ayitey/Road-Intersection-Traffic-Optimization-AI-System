@@ -103,19 +103,23 @@ class LiveRLController:
         except requests.RequestException as e:
             log.debug(f"Phase post failed: {e}")
 
+    def post_metrics_and_sim_counts(self, q, reward, step, mp_override):
+        try:
+            requests.post(f"{API_URL}/update_sim_counts", json={
+                "counts": {"North": int(q[0]), "South": int(q[1]), "East": int(q[2]), "West": int(q[3])},
+                "timestamp": time.time()
+            }, timeout=0.5)
+            requests.post(f"{API_URL}/update_metrics", json={
+                "reward": float(reward),
+                "step": int(step),
+                "mp_override": bool(mp_override)
+            }, timeout=0.5)
+        except requests.RequestException as e:
+            log.debug(f"Metrics/sim counts post failed: {e}")
+
     def _fixed_timing_action(self, step):
         """Alternate NS/EW every FIXED_TIMING_INTERVAL steps, medium duration."""
         phase = 0 if (step // FIXED_TIMING_INTERVAL) % 2 == 0 else 1
-        return np.array([phase, 1], dtype=np.int64)  # duration_level 1 = 15 s
-
-    def _manual_action_from_api(self):
-        """Read the phase the dashboard operator has set, medium duration."""
-        try:
-            r = requests.get(f"{API_URL}/dashboard_data", timeout=0.5)
-            r.raise_for_status()
-            phase = 0 if r.json().get("manual_phase", 0) in [0, 1] else 1
-        except requests.RequestException:
-            phase = 0
         return np.array([phase, 1], dtype=np.int64)  # duration_level 1 = 15 s
 
     def _save_results(self, records, start_time, model_path, override_count=0):
@@ -244,6 +248,7 @@ class LiveRLController:
             obs_sim, reward, term, trunc, _ = self.env.step(action, callback=self.post_phase_to_api)
 
             q = current_obs[:4]
+            self.post_metrics_and_sim_counts(q, reward, i+1, overridden if mode == "AI Controlled" else False)
             records.append({
                 "step"      : i + 1,
                 "mode"      : mode,

@@ -13,19 +13,17 @@ st.set_page_config(
 )
 
 API_BASE = "http://localhost:8000"
-HISTORY_LEN  = 60   # data points kept per direction (~60 seconds)
-STALE_THRESH = 5.0  # seconds before vision is considered stale
-QUEUE_ALERT  = 10   # vehicles — threshold for a high-queue alert
+HISTORY_LEN  = 60
+STALE_THRESH = 5.0
+QUEUE_ALERT  = 10
 
 # ── Session state initialisation ──────────────────────────────
 def _init_state():
     defaults = {
         "last_pushed_mode": "AI Controlled",
-        "history": {d: deque([0] * HISTORY_LEN, maxlen=HISTORY_LEN) for d in ["North", "South", "East", "West"]},
-        "timestamps":    deque(maxlen=HISTORY_LEN),
-        "alert_log":     deque(maxlen=20),
         "phase_start":   time.time(),
         "last_phase":    -1,
+        "alert_log":     deque(maxlen=20),
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -71,8 +69,9 @@ def _log_alert(msg: str):
     ts = datetime.now().strftime("%H:%M:%S")
     st.session_state["alert_log"].appendleft(f"[{ts}]  {msg}")
 
-# ── Sidebar ───────────────────────────────────────────────────
-st.sidebar.title("🚦 Smart Traffic Control")
+# ── SIDEBAR: CONTROL PANEL ────────────────────────────────────
+st.sidebar.title("🚦 Control Panel")
+st.sidebar.markdown("Control traffic system parameters and modes")
 st.sidebar.markdown("---")
 
 MODES = ["AI Controlled", "Fixed Timing", "Manual Override"]
@@ -87,38 +86,45 @@ def on_mode_change():
         st.session_state["last_pushed_mode"] = new_mode
 
 system_mode = st.sidebar.selectbox(
-    "System Mode", MODES,
+    "System Mode",
+    MODES,
     index=current_mode_index,
     key="mode_selector",
     on_change=on_mode_change
 )
 
-if system_mode == "Manual Override":
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Manual Phase Control")
-    if st.sidebar.button("🟢 Set NORTH-SOUTH Green", use_container_width=True):
-        set_phase(0)
-        _log_alert("Manual override → NORTH-SOUTH Green")
-    if st.sidebar.button("🟢 Set EAST-WEST Green", use_container_width=True):
-        set_phase(2)
-        _log_alert("Manual override → EAST-WEST Green")
-
 st.sidebar.markdown("---")
-st.sidebar.subheader("Quick Overrides (Temp)")
-col_qo1, col_qo2 = st.sidebar.columns(2)
-with col_qo1:
-    if st.button("🚨 NS 15s", help="Force North-South green for 15s"):
+
+# Manual control section
+if system_mode == "Manual Override":
+    st.sidebar.subheader("Manual Control")
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        if st.button("🟢 NS Green", use_container_width=True):
+            set_phase(0)
+            _log_alert("Manual override → NORTH-SOUTH Green")
+    with col2:
+        if st.button("🟢 EW Green", use_container_width=True):
+            set_phase(2)
+            _log_alert("Manual override → EAST-WEST Green")
+    st.sidebar.markdown("---")
+
+# Quick overrides
+st.sidebar.subheader("Quick Overrides")
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    if st.button("🚨 NS 15s", help="Force North-South for 15 seconds", use_container_width=True):
         trigger_override(0, 15)
         _log_alert("Quick Override → NS (15s)")
-with col_qo2:
-    if st.button("🚨 EW 15s", help="Force East-West green for 15s"):
+with col2:
+    if st.button("🚨 EW 15s", help="Force East-West for 15 seconds", use_container_width=True):
         trigger_override(2, 15)
         _log_alert("Quick Override → EW (15s)")
 
 st.sidebar.markdown("---")
 
-# System health in sidebar
-st.sidebar.markdown("### System Health")
+# System health
+st.sidebar.subheader("System Health")
 api_alive    = check_api_health()
 vision_stale = True
 controller_ok = False
@@ -131,32 +137,36 @@ if data_for_sidebar:
 def dot(ok): return "🟢" if ok else "🔴"
 
 st.sidebar.markdown(
-    f"{dot(api_alive)} **API / Data Bus**  \n"
-    f"{dot(not vision_stale)} **Vision Pipeline**  \n"
-    f"{dot(controller_ok)} **AI Controller**"
+    f"**API / Data Bus:** {dot(api_alive)}  \n"
+    f"**Vision Pipeline:** {dot(not vision_stale)}  \n"
+    f"**AI Controller:** {dot(controller_ok)}"
 )
-st.sidebar.caption(f"`{API_BASE}`")
+st.sidebar.caption(f"API: {API_BASE}")
 
-# ── Main header ───────────────────────────────────────────────
-st.title("Smart Junction Real-Time Monitor")
+# ── MAIN VIEW: MONITORING DASHBOARD ───────────────────────────
 st.markdown(
-    f"AI-Powered Adaptive Traffic Control  |  **Mode: {system_mode}**  |  "
-    f"{'🟢 System Active' if controller_ok else '🔴 System Inactive'}"
+    f"<style>.block-container {{ max-width: 1400px; }}</style>",
+    unsafe_allow_html=True
 )
+
+# Header
+col_header1, col_header2 = st.columns([3, 1])
+with col_header1:
+    st.title("🚦 Smart Junction Monitor")
+    st.markdown(f"**Mode:** {system_mode} | **Status:** {'🟢 Active' if controller_ok else '🔴 Inactive'}")
+with col_header2:
+    st.markdown("")
+    st.markdown(f"<p style='text-align: right; font-size: 14px;'>Last update: {datetime.now().strftime('%H:%M:%S')}</p>", unsafe_allow_html=True)
+
 st.markdown("---")
 
-# ── Fetch live data & update history ─────────────────────────
+# Fetch live data
 data = get_data()
 
 if data:
     counts    = data["counts"]
     phase     = data["current_phase"]
     last_sync = data.get("last_vision_update", 0)
-
-    # Update rolling history
-    st.session_state["timestamps"].append(datetime.now().strftime("%H:%M:%S"))
-    for d in ["North", "South", "East", "West"]:
-        st.session_state["history"][d].append(counts[d])
 
     # Phase change detection
     if phase != st.session_state["last_phase"]:
@@ -165,57 +175,76 @@ if data:
         label = "NORTH-SOUTH" if phase in [0, 1] else "EAST-WEST"
         _log_alert(f"Phase switched → {label} Green")
 
-    # High-queue alerts
-    for d, v in counts.items():
-        if v >= QUEUE_ALERT:
-            _log_alert(f"⚠ High queue on {d}: {v} vehicles")
-
     phase_secs = int(time.time() - st.session_state["phase_start"])
-    last_green = data.get("last_green_ts", {"0": time.time(), "2": time.time()})
-    wait_ns = int(time.time() - last_green.get("0", time.time()))
-    wait_ew = int(time.time() - last_green.get("2", time.time()))
-
-    # ── Row 1: KPI strip ──────────────────────────────────────
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    total_q = sum(counts.values())
-    with k1: st.metric("North Queue",     counts["North"])
-    with k2: st.metric("South Queue",     counts["South"])
-    with k3: st.metric("East Queue",      counts["East"])
-    with k4: st.metric("West Queue",      counts["West"])
-    with k5: st.metric("NS Wait Time",  f"{wait_ns}s", delta="Starving" if wait_ns > 45 else None, delta_color="inverse")
-    with k6: st.metric("EW Wait Time",  f"{wait_ew}s", delta="Starving" if wait_ew > 45 else None, delta_color="inverse")
-
-    st.markdown("---")
-
-    # ── Row 2: Phase status | Bar chart ───────────────────────
-    col_phase, col_bar = st.columns([1, 2])
-
-    with col_phase:
-        st.subheader("Junction Phase")
+    
+    # ══════════════════════════════════════════════════════════
+    # LEFT SIDE: PHASE STATUS & CONTROL
+    # ══════════════════════════════════════════════════════════
+    
+    left_col, divider_col, right_col = st.columns([1, 0.05, 2])
+    
+    with left_col:
+        st.subheader("Current Phase")
+        st.markdown("###")  # Spacing
+        
         if phase in [0, 1]:
-            st.success("🟢 NORTH-SOUTH GREEN")
-            st.error("🔴 EAST-WEST RED")
-            phase_name = "NORTH-SOUTH"
+            st.success("🟢 NORTH-SOUTH\n **GREEN**", icon="✓")
+            st.error("🔴 EAST-WEST\n **RED**")
         else:
-            st.error("🔴 NORTH-SOUTH RED")
-            st.success("🟢 EAST-WEST GREEN")
-            phase_name = "EAST-WEST"
-
-        st.info(f"Active for **{phase_secs}s** ({phase_name})")
+            st.error("🔴 NORTH-SOUTH\n **RED**")
+            st.success("🟢 EAST-WEST\n **GREEN**", icon="✓")
+        
+        st.markdown("###")
+        st.metric("Active Duration", f"{phase_secs}s", label_visibility="collapsed")
         
         active_override = data.get("active_override", {})
         if active_override.get("phase") is not None and active_override.get("expires_at", 0) > time.time():
             rem = int(active_override["expires_at"] - time.time())
             ovr_name = "NS" if active_override["phase"] == 0 else "EW"
-            st.warning(f"🚨 Quick Override active: {ovr_name} ({rem}s rem)")
-
-        if last_sync > 0:
-            st.caption(f"Last vision sync: {datetime.fromtimestamp(last_sync).strftime('%H:%M:%S')}")
+            st.warning(f"🚨 Override active: {ovr_name} ({rem}s)")
+        
         if (time.time() - last_sync) > STALE_THRESH:
-            st.warning("⚠ Vision feed stale (>5 s)")
-
-    with col_bar:
-        st.subheader("Current Queue Lengths")
+            st.error("⚠️ Vision feed stale")
+        elif last_sync > 0:
+            sync_time = datetime.fromtimestamp(last_sync).strftime('%H:%M:%S')
+            st.success(f"✓ Vision active\n({sync_time})")
+    
+    with divider_col:
+        st.markdown(
+            """
+            <div style='
+                border-left: 3px solid #ccc;
+                height: 100%;
+                display: flex;
+                align-items: center;
+            '></div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    # ══════════════════════════════════════════════════════════
+    # RIGHT SIDE: QUEUE METRICS & CHART
+    # ══════════════════════════════════════════════════════════
+    
+    with right_col:
+        st.subheader("Queue Status")
+        
+        # Queue metrics in 2x2 grid
+        m1, m2 = st.columns(2)
+        m3, m4 = st.columns(2)
+        
+        with m1:
+            st.metric("North", counts["North"], delta="Alert" if counts["North"] >= QUEUE_ALERT else None, delta_color="off")
+        with m2:
+            st.metric("South", counts["South"], delta="Alert" if counts["South"] >= QUEUE_ALERT else None, delta_color="off")
+        with m3:
+            st.metric("East", counts["East"], delta="Alert" if counts["East"] >= QUEUE_ALERT else None, delta_color="off")
+        with m4:
+            st.metric("West", counts["West"], delta="Alert" if counts["West"] >= QUEUE_ALERT else None, delta_color="off")
+        
+        st.markdown("###")  # Spacing
+        
+        # Bar chart
         bar_fig = go.Figure(go.Bar(
             x=["North", "South", "East", "West"],
             y=[counts["North"], counts["South"], counts["East"], counts["West"]],
@@ -225,169 +254,34 @@ if data:
         ))
         bar_fig.add_hline(
             y=QUEUE_ALERT, line_dash="dash", line_color="red",
-            annotation_text="Alert threshold", annotation_position="bottom right"
+            annotation_text=f"Alert ({QUEUE_ALERT})", annotation_position="bottom right"
         )
         bar_fig.update_layout(
-            xaxis_title="Approach", yaxis_title="Vehicles",
-            margin=dict(l=10, r=10, t=10, b=10), height=280,
+            xaxis_title="Approach",
+            yaxis_title="Vehicles",
+            margin=dict(l=20, r=20, t=20, b=20),
+            height=300,
+            showlegend=False,
             yaxis_range=[0, max(max(counts.values()) + 5, QUEUE_ALERT + 5)]
         )
         st.plotly_chart(bar_fig, use_container_width=True)
-
+    
+    # ══════════════════════════════════════════════════════════
+    # EVENTS LOG
+    # ══════════════════════════════════════════════════════════
+    
     st.markdown("---")
-
-    # ── Row 3: Historical trend ────────────────────────────────
-    st.subheader("Queue History (last 60 s)")
-    hist = st.session_state["history"]
-    ts   = list(st.session_state["timestamps"])
-    while len(ts) < HISTORY_LEN:
-        ts.insert(0, "")
-
-    trend_fig = go.Figure()
-    colors = {"North": "#2196F3", "South": "#4CAF50", "East": "#FF9800", "West": "#E91E63"}
-    for d, col in colors.items():
-        trend_fig.add_trace(go.Scatter(
-            x=ts, y=list(hist[d]),
-            mode="lines", name=d, line=dict(color=col, width=2)
-        ))
-    trend_fig.add_hline(y=QUEUE_ALERT, line_dash="dash", line_color="red", line_width=1)
-    trend_fig.update_layout(
-        xaxis_title="Time", yaxis_title="Vehicles",
-        margin=dict(l=10, r=10, t=10, b=10), height=220,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        xaxis=dict(showticklabels=False)
-    )
-    st.plotly_chart(trend_fig, use_container_width=True)
-
-    st.markdown("---")
-
-    # ── Row 4: Event log ──────────────────────────────────────
-    st.subheader("Event Log")
+    st.subheader("Activity Log")
     log_entries = list(st.session_state["alert_log"])
     if log_entries:
         for entry in log_entries:
             st.caption(entry)
     else:
-        st.caption("No events yet.")
+        st.caption("_No events yet_")
 
 else:
-    st.warning("⚠ Waiting for Data Bus connection... (Ensure api/main.py is running)")
-
-time.sleep(1)
-st.rerun()
-
-
-def get_data():
-    try:
-        r = requests.get(f"{API_BASE}/dashboard_data", timeout=0.5)
-        if r.status_code == 200:
-            return r.json()
-    except Exception:
-        return None
-    return None
-
-def set_mode(mode: str):
-    try:
-        requests.post(f"{API_BASE}/set_mode", json={"mode": mode}, timeout=1.0)
-    except Exception:
-        pass
-
-def set_phase(phase: int):
-    try:
-        requests.post(f"{API_BASE}/set_phase", json={"phase": phase}, timeout=1.0)
-    except Exception:
-        pass
-
-# ── Sidebar ───────────────────────────────────────────────────────────
-st.sidebar.title("Smart Traffic Control")
-st.sidebar.markdown("---")
-
-MODES = ["AI Controlled", "Fixed Timing", "Manual Override"]
-data_for_sidebar = get_data()
-current_mode_index = MODES.index(data_for_sidebar["mode"]) if data_for_sidebar else 0
-
-# Use session_state so the selectbox is the source of truth for user input.
-# Only push to the API when the user actually changes the selector.
-if "last_pushed_mode" not in st.session_state:
-    st.session_state["last_pushed_mode"] = MODES[current_mode_index]
-
-def on_mode_change():
-    new_mode = st.session_state["mode_selector"]
-    if new_mode != st.session_state["last_pushed_mode"]:
-        set_mode(new_mode)
-        st.session_state["last_pushed_mode"] = new_mode
-
-system_mode = st.sidebar.selectbox(
-    "System Mode",
-    MODES,
-    index=current_mode_index,
-    key="mode_selector",
-    on_change=on_mode_change
-)
-
-st.sidebar.info(f"Data Bus: {API_BASE}")
-
-if system_mode == "Manual Override":
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Manual Phase Control")
-    if st.sidebar.button("Set NORTH-SOUTH Green"):
-        set_phase(0)
-    if st.sidebar.button("Set EAST-WEST Green"):
-        set_phase(2)
-
-# ── Main Page ──────────────────────────────────────────────────────────
-st.title("Smart Junction Real-Time Monitor")
-st.markdown(f"AI-Powered Adaptive Traffic Control System  |  **Mode: {system_mode}**")
-
-counts_cols = st.columns(4)
-col_phase, col_chart = st.columns([1, 2])
-
-# ── Live data ──────────────────────────────────────────────────────────
-data = get_data()
-
-if data:
-    counts = data["counts"]
-    phase  = data["current_phase"]
-
-    for col, direction in zip(counts_cols, ["North", "South", "East", "West"]):
-        col.metric(f"{direction} Queue", counts[direction])
-
-    with col_phase:
-        st.subheader("Junction Phase")
-        if phase in [0, 1]:
-            st.success("NORTH-SOUTH GREEN")
-            st.error("EAST-WEST RED")
-        else:
-            st.error("NORTH-SOUTH RED")
-            st.success("EAST-WEST GREEN")
-
-        last_sync = data["last_vision_update"]
-        if last_sync > 0:
-            st.info(f"Last Vision Sync: {datetime.fromtimestamp(last_sync).strftime('%H:%M:%S')}")
-        else:
-            st.warning("No vision data yet.")
-
-        if (time.time() - last_sync) > 5.0:
-            st.warning("Vision feed is stale (>5 s).")
-
-    with col_chart:
-        st.subheader("Approach Congestion")
-        fig = go.Figure(go.Bar(
-            x=["North", "South", "East", "West"],
-            y=[counts["North"], counts["South"], counts["East"], counts["West"]],
-            marker_color=["#2196F3", "#4CAF50", "#FF9800", "#E91E63"]
-        ))
-        fig.update_layout(
-            xaxis_title="Approach",
-            yaxis_title="Vehicles",
-            margin=dict(l=20, r=20, t=20, b=20),
-            height=300
-        )
-        # use_container_width replaced with width param (Streamlit ≥ 2026)
-        st.plotly_chart(fig, use_container_width=True)
-
-else:
-    st.warning("Waiting for Data Bus connection... (Ensure api/main.py is running)")
+    st.error("⚠️ Unable to connect to API")
+    st.info(f"Ensure the API server is running at {API_BASE}")
 
 time.sleep(1)
 st.rerun()

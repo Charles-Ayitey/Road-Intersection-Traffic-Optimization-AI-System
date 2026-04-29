@@ -1,0 +1,148 @@
+======================================================================
+  SMART TRAFFIC JUNCTION SYSTEM — SIMULATION RESULTS
+======================================================================
+  Run started : 2026-04-15 20:32:47
+  Run ended   : 2026-04-15 20:58:00
+  Model       : models\best_model_2.zip
+  Config      : simulation\junction.sumocfg
+======================================================================
+
+SUMMARY
+----------------------------------------
+  Total steps          : 116
+  Total reward         : 2722.10
+  Average reward/step  : 23.47
+  Best  reward (step)  : 44.86  (step 114)
+  Worst reward (step)  : -1.45  (step 44)
+  Max pressure overrides: 39 steps (33.6%)
+
+  Average queue lengths:
+    North : 3.86  (peak 13)
+    South : 2.58  (peak 7)
+    East  : 2.68  (peak 6)
+    West  : 1.90  (peak 6)
+
+  Mode breakdown:
+    AI Controlled       : 116 steps (100.0%)
+
+PER-STEP LOG
+--------------------------------------------------------------------------------
+ Step  Mode               Action          Dur    N    S    E    W     Reward
+--------------------------------------------------------------------------------
+    1  AI Controlled      EAST-WEST       30s    5    0    3    1      -0.60
+    2  AI Controlled      EAST-WEST       30s    4    1    3    1       3.57
+    3  AI Controlled      EAST-WEST       30s    4    0    3    1      -1.20
+    4  AI Controlled      EAST-WEST       30s    3    0    3    1       7.40
+    5  AI Controlled      EAST-WEST       30s    3    1    3    0       4.00
+    6  AI Controlled      EAST-WEST       30s    4    0    2    0      -1.03
+    7  AI Controlled      EAST-WEST       30s    2    0    2    2       7.57
+    8  AI Controlled      EAST-WEST       30s    3    1    2    2       4.00
+    9  AI Controlled      EAST-WEST       30s    2    0    1    3      -0.60
+   10  AI Controlled      EAST-WEST       30s    8    3    4    6       2.97
+   11  AI Controlled      EAST-WEST       30s    7    2    6    3       7.57
+   12  AI Controlled      EAST-WEST       30s    6    0    3    3      -1.20
+   13  AI Controlled      EAST-WEST       30s    5    1    4    3       7.40
+   14  AI Controlled      NORTH-SOUTH     30s    1    6    0    4       3.57
+   15  AI Controlled      EAST-WEST       30s    0    3    1    2       3.40
+   16  AI Controlled      NORTH-SOUTH     30s    2    7    2    2       3.57
+   17  AI Controlled      EAST-WEST       30s    1    7    4    3       7.40
+   18  AI Controlled      NORTH-SOUTH     30s    1    4    0    0       3.40
+   19  AI Controlled      NORTH-SOUTH     30s    0    5    1    1       4.08
+   20  AI Controlled      NORTH-SOUTH     30s    0    3    0    0      -1.42
+   21  AI Controlled      NORTH-SOUTH     30s    3    4    0    0       8.82
+   22  AI Controlled      EAST-WEST       30s    0    3    1    1       4.40
+   23  AI Controlled      NORTH-SOUTH     30s    6    1    0    0      26.97
+   24  AI Controlled      EAST-WEST       30s    0    0    2    2       3.88
+   25  AI Controlled      NORTH-SOUTH     30s    8    3    0    0      29.66
+   26  AI Controlled      EAST-WEST       30s    0    0    2    2       3.97
+   27  AI Controlled      NORTH-SOUTH     30s    7    1    0    0      31.82
+   28  AI Controlled      EAST-WEST       30s    4    0    3    1       3.80
+   29  AI Controlled      NORTH-SOUTH     30s    4    6    3    1      30.09
+   30  AI Controlled      EAST-WEST       30s    4    0    3    1      -0.42
+   31  AI Controlled      NORTH-SOUTH     30s    5    6    3    1      31.03
+   32  AI Controlled      EAST-WEST       30s    4    0    3    1       3.67
+   33  AI Controlled      NORTH-SOUTH     30s    4    7    3    1      31.65
+   34  AI Controlled      EAST-WEST       30s    3    0    3    1       3.80
+   35  AI Controlled      NORTH-SOUTH     30s    3    7    2    0      31.65
+   36  AI Controlled      EAST-WEST       30s    2    0    2    1      -0.03
+   37  AI Controlled      NORTH-SOUTH     30s    4    6    2    1      29.49
+   38  AI Controlled      EAST-WEST       30s    2    0    2    1       3.37
+   39  AI Controlled      NORTH-SOUTH     15s    3    1    3    2      35.13
+   40  AI Controlled      NORTH-SOUTH     15s    2    1    2    1       0.23
+   41  AI Controlled      EAST-WEST       30s    3    1    2    2       3.50
+   42  AI Controlled      NORTH-SOUTH     15s    3    1    2    1      34.44
+   43  AI Controlled      NORTH-SOUTH     15s    3    1    2    1      -0.10
+   44  AI Controlled      EAST-WEST       30s    2    1    1    2      -1.45
+   45  AI Controlled      NORTH-SOUTH     30s    9    3    4    6      38.28
+   46  AI Controlled      EAST-WEST        5s    8    1    2    4      17.74
+   47  AI Controlled      EAST-WEST       30s    6    2    3    2       6.78
+   48  AI Controlled      NORTH-SOUTH     30s    6    1    6    5      44.56
+   49  AI Controlled      EAST-WEST       30s    7    1    2    4      33.27
+   50  AI Controlled      NORTH-SOUTH     30s    3    1    1    3      32.85
+   51  AI Controlled      EAST-WEST        5s    4    0    4    2      14.36
+   52  AI Controlled      EAST-WEST       30s    0    4    4    4      10.57
+   53  AI Controlled      NORTH-SOUTH     30s   11    3    3    2      39.90
+   54  AI Controlled      EAST-WEST       30s    0    3    3    2      44.48
+   55  AI Controlled      NORTH-SOUTH     30s    9    3    3    2      32.37
+   56  AI Controlled      EAST-WEST       30s    0    3    3    2      39.78
+   57  AI Controlled      NORTH-SOUTH     30s    7    3    3    2      33.48
+   58  AI Controlled      EAST-WEST       30s    0    3    3    2      29.70
+   59  AI Controlled      NORTH-SOUTH     30s   10    3    3    2      43.40
+   60  AI Controlled      EAST-WEST       30s    0    3    3    2      32.88
+   61  AI Controlled      NORTH-SOUTH     30s    7    3    3    2      32.67
+   62  AI Controlled      EAST-WEST       30s    0    3    3    2      32.80
+   63  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      32.58
+   64  AI Controlled      EAST-WEST       30s    0    3    3    2      33.55
+   65  AI Controlled      NORTH-SOUTH     30s    9    3    3    2      37.12
+   66  AI Controlled      EAST-WEST       30s    0    3    3    2      32.30
+   67  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      30.78
+   68  AI Controlled      EAST-WEST       30s    0    3    3    2      28.81
+   69  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      31.70
+   70  AI Controlled      EAST-WEST       30s    0    3    3    2      31.70
+   71  AI Controlled      NORTH-SOUTH     30s    7    3    3    2      28.87
+   72  AI Controlled      EAST-WEST       30s    0    3    3    2      35.62
+   73  AI Controlled      NORTH-SOUTH     30s    9    3    3    2      34.96
+   74  AI Controlled      EAST-WEST       30s    0    3    3    2      29.36
+   75  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      32.00
+   76  AI Controlled      EAST-WEST       30s    0    3    3    2      31.78
+   77  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      31.95
+   78  AI Controlled      EAST-WEST        5s    0    3    3    2      15.11
+   79  AI Controlled      EAST-WEST       30s    1    3    3    2      13.00
+   80  AI Controlled      NORTH-SOUTH     30s   10    3    3    2      43.18
+   81  AI Controlled      EAST-WEST       30s    0    3    3    2      39.48
+   82  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      31.60
+   83  AI Controlled      EAST-WEST       30s    0    3    3    2      42.47
+   84  AI Controlled      NORTH-SOUTH     30s   11    3    3    2      36.71
+   85  AI Controlled      EAST-WEST       30s    0    3    3    2      36.87
+   86  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      27.28
+   87  AI Controlled      EAST-WEST       30s    0    3    3    2      40.08
+   88  AI Controlled      NORTH-SOUTH     30s    7    3    3    2      28.81
+   89  AI Controlled      EAST-WEST       30s    0    3    3    2      32.88
+   90  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      30.08
+   91  AI Controlled      EAST-WEST       30s    0    3    3    2      38.12
+   92  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      35.48
+   93  AI Controlled      EAST-WEST       30s    0    3    3    2      33.25
+   94  AI Controlled      NORTH-SOUTH     30s    9    3    3    2      40.05
+   95  AI Controlled      EAST-WEST       30s    0    3    3    2      37.02
+   96  AI Controlled      NORTH-SOUTH     30s   11    3    3    2      34.79
+   97  AI Controlled      EAST-WEST       30s    0    3    3    2      35.35
+   98  AI Controlled      NORTH-SOUTH     30s    6    3    3    2      26.08
+   99  AI Controlled      EAST-WEST       30s    0    3    3    2      41.63
+  100  AI Controlled      NORTH-SOUTH     30s    7    3    3    2      32.38
+  101  AI Controlled      EAST-WEST       30s    0    3    3    2      32.17
+  102  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      32.80
+  103  AI Controlled      EAST-WEST       30s    0    3    3    2      35.95
+  104  AI Controlled      NORTH-SOUTH     30s    7    3    3    2      34.75
+  105  AI Controlled      EAST-WEST       30s    0    3    3    2      28.51
+  106  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      32.28
+  107  AI Controlled      EAST-WEST       30s    0    3    3    2      35.62
+  108  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      32.63
+  109  AI Controlled      EAST-WEST       30s    0    3    3    2      30.00
+  110  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      30.39
+  111  AI Controlled      EAST-WEST        5s    0    3    3    2      13.80
+  112  AI Controlled      EAST-WEST       30s    2    3    3    2       2.02
+  113  AI Controlled      NORTH-SOUTH     30s   13    3    3    2      42.78
+  114  AI Controlled      EAST-WEST       30s    0    3    3    2      44.86
+  115  AI Controlled      NORTH-SOUTH     30s    8    3    3    2      32.97
+  116  AI Controlled      EAST-WEST       30s    0    3    3    2      32.68
+--------------------------------------------------------------------------------

@@ -1,6 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from typing import Dict
+from typing import Dict, List
 import time
 import logging
 import sqlite3
@@ -9,6 +9,38 @@ import os
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
+
+# --- WebSocket Manager ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        await self.send_state(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def send_state(self, websocket: WebSocket):
+        try:
+            await websocket.send_json(traffic_system_state)
+        except Exception:
+            pass
+
+    async def broadcast(self):
+        for connection in self.active_connections.copy():
+            try:
+                await connection.send_json(traffic_system_state)
+            except WebSocketDisconnect:
+                self.disconnect(connection)
+            except Exception as e:
+                log.error(f"WebSocket broadcast error: {e}")
+                self.disconnect(connection)
+
+manager = ConnectionManager()
 
 # --- SQLite Setup ---
 os.makedirs("data", exist_ok=True)
@@ -35,7 +67,17 @@ def init_db():
 init_db()
 # --------------------
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def get_empty_state():
     now = time.time()
@@ -48,7 +90,8 @@ def get_empty_state():
         "mode": "AI Controlled",
         "manual_phase": 0,
         "last_green_ts": {"0": now, "2": now},
-        "active_override": {"phase": None, "expires_at": 0.0}
+        "active_override": {"phase": None, "expires_at": 0.0},
+        "ai_metrics": {"reward": 0.0, "step": 0, "mp_override": False}
     }
 
 traffic_system_state = get_empty_state()
@@ -71,12 +114,43 @@ class OverrideRequest(BaseModel):
     phase: int
     duration: int
 
-def record_phase_change(new_phase: int):
-    # Only update the timestamp if we are literally changing into this phase
-    # Actually, we want to track "since it was last green".
-    # So if it's currently green, the wait time is 0.
-    # Therefore, we continuously update the TS for the CURRENT green phase.
-    pass # Wait, it's better to update last_green_ts continuously for the active phase.
+class MetricsUpdate(BaseModel):
+    reward: float
+    step: int
+    mp_override: bool
+
+class SimCountsUpdate(BaseModel):
+    counts: Dict[str, int]
+    timestamp: float
+
+# --- WebSocket Endpoint ---
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Just keep the connection open to listen for client disconnects
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        log.info("Dashboard client disconnected.")
+
+@app.post("/update_sim_counts")
+async def update_sim_counts(data: SimCountsUpdate):
+    global traffic_system_state
+    for direction, count in data.counts.items():
+        if direction in traffic_system_state["counts"]:
+            traffic_system_state["counts"][direction] = count
+    # Do NOT update last_vision_update here. This is purely for the dashboard to reflect SUMO queues!
+    await manager.broadcast()
+    return {"status": "ok"}
+
+@app.post("/update_metrics")
+async def update_metrics(data: MetricsUpdate):
+    global traffic_system_state
+    traffic_system_state["ai_metrics"] = {"reward": data.reward, "step": data.step, "mp_override": data.mp_override}
+    await manager.broadcast()
+    return {"status": "ok"}
 
 @app.get("/")
 def read_root():
@@ -119,30 +193,33 @@ async def update_counts(data: VisionUpdate):
     except Exception as e:
         log.error(f"Failed to log to SQLite: {e}")
 
+    await manager.broadcast()
     return {"status": "ok"}
 
 @app.post("/set_mode")
-def set_mode(data: ModeUpdate):
+async def set_mode(data: ModeUpdate):
     global traffic_system_state
     valid_modes = {"AI Controlled", "Fixed Timing", "Manual Override"}
     if data.mode not in valid_modes:
         return {"status": "error", "message": f"Invalid mode. Choose from: {valid_modes}"}
     traffic_system_state["mode"] = data.mode
     log.info(f"Mode changed to: {data.mode}")
+    await manager.broadcast()
     return {"status": "ok", "mode": data.mode}
 
 @app.post("/set_phase")
-def set_phase(data: PhaseUpdate):
+async def set_phase(data: PhaseUpdate):
     """Used by the dashboard in Manual Override mode to directly command a phase."""
     global traffic_system_state
     if data.phase not in [0, 2]:
         return {"status": "error", "message": "Phase must be 0 (NS Green) or 2 (EW Green)"}
     traffic_system_state["manual_phase"] = data.phase
     log.info(f"Manual phase set to: {data.phase}")
+    await manager.broadcast()
     return {"status": "ok", "manual_phase": data.phase}
 
 @app.post("/trigger_override")
-def trigger_override(data: OverrideRequest):
+async def trigger_override(data: OverrideRequest):
     """Used for temporary Quick Overrides (like pedestrian or emergency) without fully breaking AI mode."""
     global traffic_system_state
     if data.phase not in [0, 2]:
@@ -153,6 +230,7 @@ def trigger_override(data: OverrideRequest):
     traffic_system_state["active_override"]["expires_at"] = expires
     
     log.info(f"Quick override triggered for Phase {data.phase} for {data.duration} seconds.")
+    await manager.broadcast()
     return {"status": "ok", "expires_at": expires}
 
 @app.get("/get_state")
@@ -164,9 +242,11 @@ def get_state():
     }
 
 @app.post("/set_action")
-def set_action(data: AgentAction):
+async def set_action(data: AgentAction):
     global traffic_system_state
-    traffic_system_state["current_phase"] = data.phase
+    if traffic_system_state["current_phase"] != data.phase:
+        traffic_system_state["current_phase"] = data.phase
+        await manager.broadcast()
     return {"status": "ok"}
 
 @app.get("/dashboard_data")
