@@ -35,9 +35,11 @@ AI-driven adaptive signal control using YOLOv8 (Computer Vision) and Reinforceme
 - [x] **Launcher Script:** Created `launch_system.py` for one-click system startup.
 
 ## Phase 5: Dashboard (COMPLETED)
-- [x] **Real-time Interface:** Built Streamlit dashboard in `dashboard/app.py`.
-- [x] **Visualization:** Integrated bar charts and status indicators for live monitoring.
-- [x] **Production Rewrite:** Full rewrite with health panel, 60-s history trend, event log, alert threshold, phase timer, stale-feed warning, and mode-flicker fix.
+- [x] **Robust React Interface:** Developed a high-performance React 19 + Vite frontend in `dashboard_ui/`.
+- [x] **Modern UI/UX:** Used Tailwind CSS 4 and Lucide icons for a professional traffic control aesthetic.
+- [x] **Real-time Visualization:** Integrated Recharts for live traffic trends and AI telemetry (reward curves).
+- [x] **Interactive Controls:** Implemented WebSocket-driven status monitoring and REST-based manual overrides.
+- [x] **Production Ready:** Replaced legacy Streamlit implementation with the React dashboard for better scalability and responsive design.
 
 ## Phase 6: Observation & Reward Hardening (COMPLETED)
 - [x] **Upstream detectors:** `junction.add.xml` with 4 E1 induction loops (`det_n/s/e/w`) at pos=33; SUMO config updated.

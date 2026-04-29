@@ -27,10 +27,9 @@ def launch():
     vision_proc = subprocess.Popen([python_exe, "vision/detector.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     # 3. Start the Dashboard
-    print("Step 3: Launching AI Dashboard...")
-    dashboard_cmd = [python_exe, "-m", "streamlit", "run", "dashboard/app.py", "--server.headless", "true"]
-    dashboard_proc = subprocess.Popen(dashboard_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print("✅ Dashboard ready at http://127.0.0.1:8501")
+    print("Step 3: Launching React Dashboard (Vite)...")
+    dashboard_proc = subprocess.Popen(["pnpm", "dev"], cwd="dashboard_ui", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print("✅ Dashboard ready at http://localhost:5173")
     
     # 4. Start the RL Controller
     print("Step 4: Launching AI Controller...")

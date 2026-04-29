@@ -116,15 +116,9 @@ Please replace use_container_width with width. use_container_width will be remov
 ---
 
 ### C-11 — Dashboard Insufficient for Real Operational Use
-**File:** `dashboard/app.py`  
-**Symptom:** The original dashboard showed only a static bar chart of current queue lengths. There was no way to tell if any system component was alive, no historical trend, no alerting, and no audit trail of what the system had done.  
-**Resolution:** Full rewrite adding:
-- Per-component health indicators (API, Vision Pipeline, AI Controller) with 🟢/🔴 status.
-- 6-column KPI strip with live queue counts, total vehicles, and phase age.
-- 60-second rolling history trend chart (Plotly `go.Scatter`).
-- Alert threshold line at `QUEUE_ALERT = 10` vehicles.
-- Event log (`deque(maxlen=20)`) recording phase switches, mode changes, and high-queue alerts with timestamps.
-- Phase active timer showing seconds since the last phase change.
+**File:** `dashboard/app.py` (Legacy), `dashboard_ui/` (Current)
+**Symptom:** The original Streamlit dashboard, while functional, suffered from performance bottlenecks due to full-page rerenders and lacked the layout flexibility required for a complex AI control interface.
+**Resolution:** Migrated to a dedicated React 19 frontend. This allowed for decoupled state management, smoother WebSocket integration, and a more responsive UI using Tailwind CSS 4. The `launch_system.py` was updated to manage the React lifecycle alongside the Python backends.
 
 ---
 

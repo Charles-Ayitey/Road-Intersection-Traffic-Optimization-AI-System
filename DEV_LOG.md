@@ -88,17 +88,18 @@ This log records the chronological steps and technical actions taken during the 
   ```
 
 #### **Step 11: Production-Grade Dashboard Rewrite**
-- **Motivation:** Original dashboard lacked real-time health monitoring, trend history, alerting, and event logging — insufficient for a real deployment.
-- **Full rewrite of `dashboard/app.py`** adding:
-  - **Constants:** `HISTORY_LEN=60` (seconds of rolling history), `STALE_THRESH=5.0` s, `QUEUE_ALERT=10` vehicles.
-  - **Session state management:** `_init_state()` initialises `session_state` with per-direction `deque` history buffers, `timestamps`, `alert_log`, and `phase_start` / `last_phase` trackers.
-  - **System health panel (sidebar):** Independent 🟢/🔴 liveness indicators for API server, Vision Pipeline, and AI Controller. Uses a dedicated `check_api_health()` probe.
-  - **6-column KPI strip:** Live N / S / E / W queue counts + Total Vehicles + Phase Active timer (seconds since last phase change).
-  - **Bar chart with alert line:** Plotly `go.Bar` with a dashed red threshold line at `QUEUE_ALERT`.
-  - **60-second history trend:** Plotly `go.Scatter` for all four directions, updates every cycle.
-  - **Event log:** `deque(maxlen=20)` captures phase switches, mode changes, and high-queue alerts with timestamps.
-  - **Mode selector fix retained:** `on_change` callback + `last_pushed_mode` guard (from Step 7) carried over into the rewrite.
-- **Outcome:** No Pylance errors; dashboard is suitable for operational monitoring.
+... (this entry already exists, I will append a new one) ...
+
+---
+
+### **Date: 2026-04-29**
+
+#### **Step 21: Migration to Robust React Frontend**
+- **Action:** Decommissioned the legacy Streamlit dashboard (`dashboard/app.py`).
+- **Action:** Activated the React 19 + Vite + Tailwind CSS 4 frontend in `dashboard_ui/` as the primary user interface.
+- **Action:** Updated `launch_system.py` to orchestrate the React dev server via `pnpm dev`.
+- **Reasoning:** Streamlit was sufficient for prototyping but limited in interactivity and layout flexibility. The React frontend provides a superior UX, dedicated AI telemetry tabs, and more responsive WebSocket handling.
+- **Outcome:** The system now launches with a professional-grade React dashboard at `http://localhost:5173`.
 
 ---
 
